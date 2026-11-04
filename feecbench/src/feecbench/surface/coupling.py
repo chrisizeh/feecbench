@@ -19,7 +19,7 @@ import torch
 
 from .data import atomic_json, load
 from .metrics import norm2
-from .model import SurfaceTransolver, loss, quadratic, tensor_sample
+from .model import SurfaceTransolver, forward_features, loss, quadratic, tensor_sample
 from .training import _save_checkpoint, device_for
 
 
@@ -120,6 +120,7 @@ def _context(root, run, device):
     if settings["fingerprint"] != index["fingerprint"]:
         raise ValueError("checkpoint/corpus fingerprint mismatch")
     architecture = {k: settings[k] for k in ("width", "blocks", "slices")}
+    architecture["adapter"] = settings.get("adapter", "scalar")
     model = SurfaceTransolver(**architecture).to(device)
     model.load_state_dict(checkpoint["model"])
     return index, checkpoint, model
@@ -159,6 +160,8 @@ def inspect_checkpoint(root, run, output, device="cpu", queries=3):
         "checkpoint_epoch": checkpoint["epoch"],
         "source_checkpoint_sha256": checkpoint["diagnostic_source_sha256"],
         "queries_per_configuration": queries,
+        "architecture": model.settings,
+        "parameter_count": sum(p.numel() for p in model.parameters()),
         "scales": scales,
         "summary": summary,
         "cases": rows,
@@ -237,7 +240,19 @@ def _fit_passes(cases):
 
 
 def overfit_coupling(
-    root, run, output, device="cpu", steps=500, queries=3, seed=0, report_every=50, objective="mass", energy_floor=1e-6
+    root,
+    run,
+    output,
+    device="cpu",
+    steps=500,
+    queries=3,
+    seed=0,
+    report_every=50,
+    objective="mass",
+    energy_floor=1e-6,
+    adapter=None,
+    lr_schedule="constant",
+    final_lr_ratio=0.01,
 ):
     """Fresh model, fixed architecture/scales, joint pure-source and zero controls.
 
@@ -247,6 +262,8 @@ def overfit_coupling(
     """
     if steps < 1 or report_every < 1:
         raise ValueError("steps and report_every must be positive")
+    if lr_schedule not in ("constant", "cosine") or not 0 < final_lr_ratio <= 1:
+        raise ValueError("schedule must be constant/cosine and final_lr_ratio in (0,1]")
     if objective not in ("mass", "balanced"):
         raise ValueError("diagnostic objective must be mass or balanced")
     if not np.isfinite(energy_floor) or energy_floor <= 0:
@@ -262,11 +279,17 @@ def overfit_coupling(
     del source_model, checkpoint
     scales = settings["scales"]
     architecture = {k: settings[k] for k in ("width", "blocks", "slices")}
+    architecture["adapter"] = adapter if adapter is not None else settings.get("adapter", "scalar")
     torch.manual_seed(seed)
     if device.type == "cuda":
         torch.cuda.manual_seed_all(seed)
     model = SurfaceTransolver(**architecture).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=settings["lr"])
+    scheduler = (
+        torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=steps, eta_min=settings["lr"] * final_lr_ratio)
+        if lr_schedule == "cosine"
+        else None
+    )
     samples = select_overfit_samples(root, index["samples"])
     batches = [tensor_sample(sample, scales, device) for sample in samples]
     indices = [query_indices(sample, queries) for sample in samples]
@@ -326,6 +349,7 @@ def overfit_coupling(
                 "mass_score": mass_score,
                 "cases": cases,
                 "gradient_statistics": gradient_statistics(),
+                "next_learning_rate": optimizer.param_groups[0]["lr"],
                 "seconds": time.perf_counter() - start,
             }
         )
@@ -336,17 +360,25 @@ def overfit_coupling(
                 output / "best.pt",
                 {
                     "model": best_state,
-                    "settings": {**settings, "objective": objective},
+                    "settings": {
+                        **settings,
+                        "objective": objective,
+                        "adapter": architecture["adapter"],
+                        "features": forward_features(architecture["adapter"]),
+                    },
                     "step": step,
                     "diagnostic_only": True,
                     "objective_score": score,
                     "mass_score": mass_score,
                     "energy_records": energy_records,
                     "energy_floor": energy_floor,
+                    "lr_schedule": lr_schedule,
+                    "final_lr_ratio": final_lr_ratio if scheduler is not None else 1.0,
                 },
             )
         print(
             f"overfit step={step} objective={objective} score={score:.6g} mass={mass_score:.6g} "
+            f"lr={optimizer.param_groups[0]['lr']:.3g} "
             + " ".join(
                 f"{r['coupling']['direction']} response={r['coupling']['response_nrmse']:.4f} "
                 f"gain={r['coupling']['response_rms_ratio']:.4f} zero={r['coupling']['zero_input_output_nrmse']:.4f}"
@@ -378,6 +410,8 @@ def overfit_coupling(
         clipped_updates += int(preclip > 1.0)
         updates += 1
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
         if step % report_every == 0 or step == steps:
             measure(step)
     final_cases = history[-1]["cases"]
@@ -391,7 +425,15 @@ def overfit_coupling(
         "seed": seed,
         "steps": steps,
         "architecture": architecture,
+        "source_adapter": settings.get("adapter", "scalar"),
+        "features": forward_features(architecture["adapter"]),
+        "parameter_count": sum(p.numel() for p in model.parameters()),
+        "paired_initialization": "legacy shared weights; extra vector feature columns start at zero",
         "learning_rate": settings["lr"],
+        "lr_schedule": lr_schedule,
+        "final_lr_ratio": final_lr_ratio if scheduler is not None else 1.0,
+        # Scheduler steps after each update; this is the rate for a next update.
+        "final_learning_rate": group["lr"],
         "objective": objective,
         "source_objective": settings["objective"],
         "scales": scales,

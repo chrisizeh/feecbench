@@ -126,6 +126,7 @@ def compare_runs(run_directories, output):
                 "bands",
             )
         }
+        identity["adapter"] = settings.get("adapter", "scalar")
         if shared is not None and shared != identity:
             raise ValueError("comparison requires matched data, architecture, field scales and budgets")
         shared = identity

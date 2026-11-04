@@ -57,7 +57,8 @@ def test_sparse_weighted_gradient(samples):
     torch.testing.assert_close(numerical, torch.dot(x.grad, direction), atol=1e-7, rtol=1e-7)
 
 
-def test_end_to_end_orientation(samples):
+@pytest.mark.parametrize("adapter", ["scalar", "vector_features"])
+def test_end_to_end_orientation(samples, adapter):
     sample = samples[1]
     scales = {"pressure": 2.3, "velocity": 0.7}
     batch = tensor_sample(sample, scales)
@@ -74,7 +75,7 @@ def test_end_to_end_orientation(samples):
         sample.offgrid,
     )
     torch.manual_seed(4)
-    model = SurfaceTransolver(32, 1, 8).eval()
+    model = SurfaceTransolver(32, 1, 8, adapter=adapter).eval()
     p, u = model(batch, 0.2)
     fp, fu = model(tensor_sample(flipped, scales), 0.2)
     torch.testing.assert_close(fp, p)
@@ -140,6 +141,7 @@ def test_resume_exact_epoch_trajectory(samples, tmp_path):
     for key in a["model"]:
         torch.testing.assert_close(a["model"][key], b["model"][key], rtol=0, atol=0)
     assert a["best"] == b["best"]
+    assert "adapter" not in a["settings"]  # Legacy scalar checkpoints retain their settings identity.
     with pytest.raises(ValueError, match="hash mismatch"):
         train(root, tmp_path / "resumed", epochs=3, resume=True, seed=9, **kwargs)
     assert load(root / "train-0.h5").metadata["split"] == "train"
@@ -244,6 +246,25 @@ def test_actual_sample_diagnostic_preserves_run_and_uses_training_only(samples, 
     assert balanced["history"][0]["mass_score"] == report["history"][0]["mass_score"]
     assert balanced["history"][0]["objective_score"] != report["history"][0]["objective_score"]
     assert balanced["final_cases"] == balanced["history"][-1]["cases"]
+    assert balanced["lr_schedule"] == "constant"
+    assert balanced["final_learning_rate"] == balanced["learning_rate"]
+    cosine = overfit_coupling(
+        root,
+        run,
+        tmp_path / "cosine",
+        steps=2,
+        queries=2,
+        report_every=1,
+        objective="balanced",
+        lr_schedule="cosine",
+        final_lr_ratio=0.01,
+    )
+    assert cosine["history"][0]["cases"] == balanced["history"][0]["cases"]
+    assert cosine["lr_schedule"] == "cosine"
+    assert cosine["final_learning_rate"] == pytest.approx(cosine["learning_rate"] * 0.01)
+    assert cosine["history"][0]["next_learning_rate"] == cosine["learning_rate"]
+    assert cosine["history"][1]["next_learning_rate"] == pytest.approx(cosine["learning_rate"] * 0.505)
+    assert cosine["history"][-1]["next_learning_rate"] == cosine["final_learning_rate"]
     assert balanced["gradient_statistics"]["updates"] == 2
     assert 0 <= balanced["gradient_statistics"]["clipped_fraction"] <= 1
     assert len(balanced["energy_records"]) == 2
@@ -251,6 +272,19 @@ def test_actual_sample_diagnostic_preserves_run_and_uses_training_only(samples, 
         for field in ("pressure", "velocity"):
             assert record[field]["objective_weight"] == 1 / record[field]["denominator"]
     assert (run / "best.pt").read_bytes() == original
+    from feecbench.surface.training import evaluate
+
+    with pytest.raises(ValueError, match="hash mismatch"):
+        train(root, run, epochs=2, width=16, blocks=1, slices=4, resume=True, adapter="vector_features")
+    vector_run = tmp_path / "vector-run"
+    train(root, vector_run, epochs=1, width=16, blocks=1, slices=4, adapter="vector_features")
+    checkpoint = torch.load(vector_run / "best.pt", weights_only=False)
+    assert checkpoint["settings"]["adapter"] == "vector_features"
+    assert len(checkpoint["settings"]["features"]["edge"]) == 7
+    results = evaluate(root, vector_run / "best.pt", tmp_path / "vector-evaluation", residual_subset=0)
+    assert {row["method"] for row in results} == {"neural", "modal", "zero", "persistence"}
+    vector_fit = inspect_checkpoint(root, vector_run, tmp_path / "vector-inspection.json", queries=2)
+    assert vector_fit["architecture"]["adapter"] == "vector_features"
     with pytest.raises(ValueError, match="empty"):
         overfit_coupling(root, run, tmp_path / "overfit", steps=1, queries=2)
 
@@ -299,3 +333,48 @@ def test_balanced_coupling_loss_energies_scaling_and_gradients(samples, which):
     zero_raw, floored = fixed_field_energies(zero_batch, qs, floor=0.01)
     torch.testing.assert_close(zero_raw, torch.zeros(2))
     torch.testing.assert_close(floored, torch.full((2,), 0.01))
+
+
+def test_directional_feature_initialization_and_gradients(samples):
+    torch.manual_seed(31)
+    scalar = SurfaceTransolver(32, 1, 8)
+    scalar_rng = torch.get_rng_state().clone()
+    torch.manual_seed(31)
+    vector = SurfaceTransolver(32, 1, 8, adapter="vector_features")
+    assert torch.equal(torch.get_rng_state(), scalar_rng)
+    for key, value in scalar.state_dict().items():
+        other = vector.state_dict()[key]
+        if key == "edge_encoder.weight":
+            torch.testing.assert_close(value, other[:, :10], rtol=0, atol=0)
+            assert torch.count_nonzero(other[:, 10:]) == 0
+        else:
+            torch.testing.assert_close(value, other, rtol=0, atol=0)
+    for i, sample in enumerate(samples):
+        batch = tensor_sample(sample, {"pressure": 1.3, "velocity": 0.7})
+        left, right = scalar(batch, 0.4), vector(batch, 0.4)
+        for a, b in zip(left, right, strict=True):
+            torch.testing.assert_close(a, b, atol=1e-6, rtol=1e-5)
+        vector.zero_grad()
+        loss(right, (batch["pressure"][2], batch["velocity"][2]), batch).backward()
+        gradient = vector.edge_encoder.weight.grad[:, 10:]
+        if i == 0:  # A pure pressure input has u0=0, so these features vanish exactly.
+            assert torch.count_nonzero(gradient) == 0
+        else:
+            assert torch.linalg.vector_norm(gradient) > 1e-7
+    assert sum(p.numel() for p in vector.parameters()) - sum(p.numel() for p in scalar.parameters()) == 3 * 32
+
+
+def test_directional_features_recover_edge_measurement(samples):
+    model = SurfaceTransolver(16, 1, 4, adapter="vector_features")
+    sample = samples[1]
+    batch = tensor_sample(sample, {"pressure": 1.3, "velocity": 0.7})
+    captured = []
+    hook = model.edge_encoder.register_forward_pre_hook(lambda _, inputs: captured.append(inputs[0].detach()))
+    model(batch, 0.2)
+    hook.remove()
+    features = captured[0]
+    torch.testing.assert_close(features[:, 10:], features[:, 7:8] * features[:, 3:6])
+    torch.testing.assert_close((features[:, 10:] * features[:, 3:6]).sum(dim=1), features[:, 7])
+    assert features.shape[1] == 13
+    with pytest.raises(ValueError, match="adapter"):
+        SurfaceTransolver(adapter="unknown")

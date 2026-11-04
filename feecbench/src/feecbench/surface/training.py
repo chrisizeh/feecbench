@@ -13,7 +13,7 @@ import torch
 
 from .data import atomic_json, digest, load, training_scales
 from .metrics import aggregate, residuals, score
-from .model import SurfaceTransolver, loss, tensor_sample
+from .model import SurfaceTransolver, forward_features, loss, tensor_sample
 from .oracle import Midpoint, ModalControl
 
 
@@ -46,6 +46,7 @@ def train(
     resume=False,
     bands=None,
     spectral_weight=1.0,
+    adapter="scalar",
 ):
     device = device_for(device)
     if epochs < 1 or accumulation < 1:
@@ -74,18 +75,18 @@ def train(
         "bands": bands,
         "spectral_weight": spectral_weight,
         "selection_score": "mean configuration normalized-field mass squared error / area, p+u, regular t>0",
-        "features": {
-            "vertex": ["xyz", "p0/scalep", "c", "t"],
-            "edge": ["midpoint", "canonical_tangent", "length", "canonical_u0/(length*scaleu)", "c", "t"],
-        },
+        "features": forward_features(adapter),
     }
+    # Preserve the exact legacy scalar settings/hash so old runs still resume.
+    if adapter != "scalar":
+        settings["adapter"] = adapter
     identity = digest(settings)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if device.type == "cuda":
         torch.cuda.manual_seed_all(seed)
-    model = SurfaceTransolver(width, blocks, slices).to(device)
+    model = SurfaceTransolver(width, blocks, slices, adapter=adapter).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     rng = np.random.default_rng(seed)
     start_epoch, best, history = 0, float("inf"), []
@@ -200,7 +201,9 @@ def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1):
     index = json.loads((root / "index.json").read_text())
     if index["fingerprint"] != settings["fingerprint"]:
         raise ValueError("evaluation corpus differs from checkpoint manifest")
-    model = SurfaceTransolver(**{k: settings[k] for k in ("width", "blocks", "slices")}).to(device)
+    model = SurfaceTransolver(
+        **{k: settings[k] for k in ("width", "blocks", "slices")}, adapter=settings.get("adapter", "scalar")
+    ).to(device)
     model.load_state_dict(checkpoint["model"])
     model.eval()
     scales, rows, residual_reports = settings["scales"], [], []

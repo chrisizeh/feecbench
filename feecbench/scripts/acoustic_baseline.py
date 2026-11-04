@@ -35,6 +35,12 @@ def main():
     parser.add_argument("--snapshots", type=int)
     parser.add_argument("--modes", type=int)
     parser.add_argument("--paired", action="store_true")
+    parser.add_argument(
+        "--adapter",
+        choices=("scalar", "vector_features"),
+        default="scalar",
+        help="training adapter; evaluation restores the checkpoint adapter",
+    )
     args = parser.parse_args()
     if args.epochs is not None and args.epochs < 1:
         parser.error("epochs must be positive")
@@ -44,7 +50,8 @@ def main():
     root = args.root or base / (
         "smoke-data" if smoke else "development-data" if args.stage == "development" else "pilot-data"
     )
-    output = args.output or base / f"{'smoke' if smoke else 'run'}-{args.objective}-seed{args.seed}"
+    adapter_suffix = "" if args.adapter == "scalar" else f"-{args.adapter}"
+    output = args.output or base / f"{'smoke' if smoke else 'run'}{adapter_suffix}-{args.objective}-seed{args.seed}"
     protocol = read_protocol(args.protocol) if args.protocol else None
     if args.stage == "pilot" and protocol is None:
         parser.error("pilot requires --protocol from completed numerical/protocol gates; use development first")
@@ -106,6 +113,7 @@ def main():
             slices=8 if smoke else 32,
             resume=args.resume,
             bands=bands,
+            adapter=args.adapter,
         )
     if args.stage in ("smoke", "pilot", "evaluate"):
         evaluate(root, output / "best.pt", output / "evaluation", device=args.device)

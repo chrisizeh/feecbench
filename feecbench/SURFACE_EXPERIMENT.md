@@ -8,7 +8,7 @@ that all proposed mesh/frequency ranges are adequately resolved.
 ## Executed validation (2026-11-04)
 
 - Original planar acceptance suite: 40 tests pass.
-- Combined acceptance suite: 78 passed; one CUDA comparison skipped on this Mac.
+- Combined acceptance suite: 81 passed; one CUDA comparison skipped on this Mac.
 - Independent MFEM 4.8 assembly and independently stepped trajectories: all 36 cases
   passed (3 genera × 2 geometries × 3 resolutions × 2 ICs), plus pressure-only and
   stationary-harmonic checks. Maximum relative matrix discrepancy: `6.14e-14`;
@@ -145,7 +145,7 @@ uv run --locked --extra surface python scripts/report_acoustic.py plot \
   --root reports/acoustic/smoke-data \
   --evaluation reports/acoustic/smoke-mass-seed0/evaluation
 uv run --locked --extra surface python scripts/report_acoustic.py compare \
-  --runs reports/acoustic/run-*-seed* --output reports/acoustic/comparison.json
+  --runs reports/acoustic/run-mse-seed* reports/acoustic/run-mass-seed* reports/acoustic/run-spectral-seed* --output reports/acoustic/comparison.json
 ```
 
 Reports retain per-configuration/time errors, ordinary cochain MSE, normalized and
@@ -304,3 +304,57 @@ supports sensitivity to weighting/optimization, not a completed model fix or a
 claim about grid-16 GPU results. The experiment used the existing grid-12 corpus;
 repeat with the user's own corpus and source-run configuration for a matched local
 comparison. Reports are ignored under `reports/acoustic/coupling-{mass,balanced}-500`.
+
+### Longer fits and optional directional features
+
+The 500-update failure is not sufficient evidence of an architecture limitation.
+Extending the same grid-12 balanced scalar experiment to 1,500 updates gave final
+source-response errors 0.0904 (pressure to velocity) and 0.0993 (velocity to
+pressure), with zero-input errors 0.0185 and 0.0076. Actual cross-field errors also
+passed the 10% diagnostic criterion. This is one seed on two fitting configurations,
+not a generalization result or a guarantee for the grid-16 corpus.
+
+`--lr-schedule cosine` optionally decays the diagnostic learning rate from the
+source run's rate toward `--final-lr-ratio` times that rate (default 0.01).
+Scheduling occurs after each update: `next_learning_rate` in history and
+`final_learning_rate` in the report describe the rate scheduled for the next
+update. The default remains constant. A comparison that changes both budget and
+schedule cannot identify the effect of scheduling alone. This option does not
+alter the main benchmark training loop.
+
+A local grid-12 scalar run with 2,000 updates and cosine decay reached final
+response errors 0.0630 and 0.0441, actual cross-field errors 0.0624 and 0.0441,
+and zero-input errors 0.0105 and 0.0012. Both best-selected and final-budget
+coupling criteria passed. The same-field velocity error on the exact-velocity
+case was still 0.1765, so this is not a claim that every field error is below 10%.
+The run took about 300 seconds on CPU; its ignored report is
+`reports/acoustic/coupling-scalar-cosine-2000/overfit/report.json`.
+
+To check the same scalar model with a longer, decaying-rate fitting budget on
+the grid-16 corpus, use a fresh output directory:
+
+```bash
+uv run --locked --extra surface python scripts/diagnose_coupling.py overfit --device cuda --root reports/acoustic/development-g16 --run reports/acoustic/dev-g16-mass-seed0 --output reports/acoustic/coupling-g16-cosine-2000 --steps 2000 --objective balanced --adapter scalar --lr-schedule cosine
+```
+
+The optional `--adapter vector_features` appends three edge-direction projection
+components `(canonical_u0 / (length * scaleu)) * canonical_unit_tangent` to the
+existing scalar edge features. It is neither a full velocity reconstruction nor a
+rotation-equivariant architecture. For pure pressure inputs these additional
+features vanish. All shared weights and the RNG state match the scalar adapter
+at initialization; the added columns start at zero, adding `3 * width` parameters
+(384 at width 128). No incidence or stiffness operator enters the forward pass.
+
+At the same 1,500-update grid-12 budget, this variant gave response errors 0.0690
+and 0.0883, but failed the joint diagnostic criterion because its actual
+pressure-to-velocity error remained above 10%. It is an experimental comparison,
+not an established fix. Keep `scalar` for the next optimization check.
+
+The diagnostic defaults to the source checkpoint's adapter; `--adapter scalar`
+or `--adapter vector_features` explicitly selects a fresh fitting model.
+Benchmark training also supports `--adapter vector_features` with separate default
+output paths. Evaluation restores the saved adapter, resume rejects a changed
+adapter, and loss comparisons reject mixed adapters. Existing scalar checkpoint
+identities and resume behavior are preserved. Keep comparison globs specific to
+one adapter. Local reports are ignored under
+`reports/acoustic/coupling-{scalar,vector_features}-1500`.

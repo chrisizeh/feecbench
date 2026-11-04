@@ -1,7 +1,9 @@
 """Small Transolver-style slice-attention adaptation, direct query time prediction.
 
 Vertex inputs: xyz, p0, c, t. Edge inputs: midpoint xyz, canonical tangent,
-length, u0/length, c, t. No learned incidence/operator transport is claimed.
+length, u0/length, c, t. The optional vector_features adapter appends the
+edge-direction projection (u0/length)*unit_tangent; it is not a full vector
+reconstruction. No learned incidence/operator transport is claimed.
 """
 
 from __future__ import annotations
@@ -9,6 +11,19 @@ from __future__ import annotations
 import numpy as np
 import torch
 from torch import nn
+
+
+def forward_features(adapter="scalar"):
+    """Record the exact learner-visible feature list for checkpoint provenance."""
+    if adapter not in ("scalar", "vector_features"):
+        raise ValueError("adapter must be scalar or vector_features")
+    result = {
+        "vertex": ["xyz", "p0/scalep", "c", "t"],
+        "edge": ["midpoint", "canonical_tangent", "length", "canonical_u0/(length*scaleu)", "c", "t"],
+    }
+    if adapter == "vector_features":
+        result["edge"].append("(canonical_u0/(length*scaleu))*canonical_unit_tangent [3 components]")
+    return result
 
 
 class SliceAttention(nn.Module):
@@ -33,14 +48,25 @@ class SliceAttention(nn.Module):
 
 
 class SurfaceTransolver(nn.Module):
-    def __init__(self, width=128, blocks=4, slices=32):
+    def __init__(self, width=128, blocks=4, slices=32, adapter="scalar"):
         super().__init__()
-        self.settings = {"width": width, "blocks": blocks, "slices": slices}
+        if adapter not in ("scalar", "vector_features"):
+            raise ValueError("adapter must be scalar or vector_features")
+        self.adapter = adapter
+        self.settings = {"width": width, "blocks": blocks, "slices": slices, "adapter": adapter}
         self.vertex_encoder = nn.Linear(6, width)
         self.edge_encoder = nn.Linear(10, width)
         self.blocks = nn.ModuleList([SliceAttention(width, slices) for _ in range(blocks)])
         self.pressure_head = nn.Sequential(nn.LayerNorm(width), nn.Linear(width, 1))
         self.velocity_head = nn.Sequential(nn.LayerNorm(width), nn.Linear(width, 1))
+        if adapter == "vector_features":
+            # Initialize all shared parameters in the legacy RNG order. At the
+            # same seed the added features start with zero influence, so the
+            # two adapters have the same initial function (up to GEMM roundoff).
+            with torch.no_grad():
+                weight = self.edge_encoder.weight
+                self.edge_encoder.weight = nn.Parameter(torch.cat((weight, weight.new_zeros(width, 3)), dim=1))
+                self.edge_encoder.in_features = 13
 
     def forward(self, batch, query_time):
         """One mesh per call. Canonicalize input and map velocity back to requested signs."""
@@ -65,6 +91,8 @@ class SurfaceTransolver(nn.Module):
             ),
             dim=1,
         )
+        if self.adapter == "vector_features":
+            e = torch.cat((e, uv * (tangent / length[:, None])), dim=1)
         tokens = torch.cat((self.vertex_encoder(v), self.edge_encoder(e)))
         for block in self.blocks:
             tokens = block(tokens)

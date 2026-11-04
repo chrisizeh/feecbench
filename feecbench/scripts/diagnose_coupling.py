@@ -24,6 +24,9 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--objective", choices=("mass", "balanced"), default="mass")
     parser.add_argument("--energy-floor", type=float, default=1e-6)
+    parser.add_argument("--adapter", choices=("source", "scalar", "vector_features"), default="source")
+    parser.add_argument("--lr-schedule", choices=("constant", "cosine"), default="constant")
+    parser.add_argument("--final-lr-ratio", type=float, default=0.01)
     args = parser.parse_args()
     if args.output.exists() and any(args.output.iterdir()):
         parser.error("output directory must be empty; use a new directory")
@@ -40,6 +43,9 @@ def main():
             args.seed,
             objective=args.objective,
             energy_floor=args.energy_floor,
+            adapter=None if args.adapter == "source" else args.adapter,
+            lr_schedule=args.lr_schedule,
+            final_lr_ratio=args.final_lr_ratio,
         )
         print("Best-selected coupling fit below 10%:", report["coupling_fit_below_10_percent"])
         print("Final-budget coupling fit below 10%:", report["final_coupling_fit_below_10_percent"])
