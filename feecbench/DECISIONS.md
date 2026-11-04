@@ -114,3 +114,14 @@ Design and implementation choices behind feecbench, with the reasoning for each.
     thresholds and numerical settings. Unresolved bands cannot enter the spectral
     objective. See `SURFACE_EXPERIMENT.md` for executed measurements and remaining
     research gates; CPU smoke is not a scientific loss comparison.
+
+21. **Exploratory campaigns retain failures and separate numerical evidence.**
+    Campaign manifests, budgets and source identities are fixed before generation.
+    A disjoint preselected audit covers familiar and shifted geometry distributions;
+    it reports uncertainty without automatically approving scientific gates. Default
+    execution is one scalar/mass seed, with explicit expansion to paired seeds and
+    losses. Spectral expansion requires a supplied frozen protocol. Held-out scores
+    never automatically alter training. The authoritative latest checkpoint contains
+    the best model and history to recover interrupted epoch commits; evaluation
+    caches are bound to checkpoint and prediction hashes. See the campaign commands
+    in `SURFACE_EXPERIMENT.md`.

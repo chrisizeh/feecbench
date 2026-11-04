@@ -47,6 +47,7 @@ def train(
     bands=None,
     spectral_weight=1.0,
     adapter="scalar",
+    progress=False,
 ):
     device = device_for(device)
     if epochs < 1 or accumulation < 1:
@@ -90,6 +91,7 @@ def train(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     rng = np.random.default_rng(seed)
     start_epoch, best, history = 0, float("inf"), []
+    best_state, best_epoch = None, None
     latest = output / "latest.pt"
     if resume:
         checkpoint = torch.load(latest, map_location=device, weights_only=False)
@@ -98,6 +100,33 @@ def train(
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         start_epoch, best, history = checkpoint["epoch"] + 1, checkpoint["best"], checkpoint["history"]
+        if epochs < start_epoch:
+            raise ValueError("requested budget is shorter than the completed training history")
+        # latest.pt commits the epoch. Its embedded best state repairs a crash
+        # before best.pt/history.json were written, including at the final epoch.
+        saved_best = (
+            torch.load(output / "best.pt", map_location="cpu", weights_only=False)
+            if (output / "best.pt").exists()
+            else None
+        )
+        best_state = checkpoint.get("best_model")
+        best_epoch = checkpoint.get("best_epoch")
+        if best_state is None:  # Backward compatibility with complete legacy runs.
+            if saved_best is None or saved_best["best"] != best:
+                raise ValueError("legacy checkpoint has no recoverable best model")
+            best_state, best_epoch = saved_best["model"], saved_best["epoch"]
+        if saved_best is None or saved_best["epoch"] != best_epoch or saved_best["best"] != best:
+            _save_checkpoint(
+                output / "best.pt",
+                {
+                    "model": best_state,
+                    "settings": settings,
+                    "epoch": best_epoch,
+                    "identity": identity,
+                    "best": best,
+                },
+            )
+        atomic_json(output / "history.json", history)
         rng.bit_generator.state = checkpoint["numpy_rng"]
         torch.set_rng_state(checkpoint["torch_rng"].cpu())
         if device.type == "cuda" and checkpoint["cuda_rng"] is not None:
@@ -165,6 +194,9 @@ def train(
             raise RuntimeError("nonfinite validation score")
         improved = val < best
         best = min(val, best)
+        if improved:
+            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            best_epoch = epoch
         history.append(
             {
                 "epoch": epoch,
@@ -178,6 +210,8 @@ def train(
             "optimizer": optimizer.state_dict(),
             "epoch": epoch,
             "best": best,
+            "best_model": best_state,
+            "best_epoch": best_epoch,
             "settings": settings,
             "identity": identity,
             "history": history,
@@ -189,10 +223,12 @@ def train(
         if improved:
             _save_checkpoint(output / "best.pt", checkpoint)
         atomic_json(output / "history.json", history)
+        if progress:
+            print(f"epoch={epoch + 1}/{epochs} train={running / len(order):.6g} validation={val:.6g}", flush=True)
     return output / "best.pt"
 
 
-def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1):
+def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1, resume=False):
     device = device_for(device)
     root, output = Path(root), Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -201,6 +237,23 @@ def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1):
     index = json.loads((root / "index.json").read_text())
     if index["fingerprint"] != settings["fingerprint"]:
         raise ValueError("evaluation corpus differs from checkpoint manifest")
+    if resume:
+        import hashlib
+
+        identity = {
+            "checkpoint_sha256": hashlib.sha256(Path(checkpoint_path).read_bytes()).hexdigest(),
+            "fingerprint": index["fingerprint"],
+            "residual_subset": residual_subset,
+            "evaluation_version": 1,
+        }
+        identity_path = output / "identity.json"
+        if identity_path.exists():
+            if json.loads(identity_path.read_text()) != identity:
+                raise ValueError("evaluation resume identity mismatch; use a new output directory")
+        elif any(output.iterdir()):
+            raise ValueError("evaluation resume requires its recorded identity")
+        else:
+            atomic_json(identity_path, identity)
     model = SurfaceTransolver(
         **{k: settings[k] for k in ("width", "blocks", "slices")}, adapter=settings.get("adapter", "scalar")
     ).to(device)
@@ -210,6 +263,15 @@ def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1):
     for entry in index["samples"]:
         if entry["split"] in ("train", "verification"):
             continue
+        prediction_path = output / "predictions" / entry["config_id"] / f"{entry['resolution']}.npz"
+        cache_path = output / "cache" / entry["config_id"] / f"{entry['resolution']}.json"
+        if resume and cache_path.exists() and prediction_path.exists():
+            cache = json.loads(cache_path.read_text())
+            if hashlib.sha256(prediction_path.read_bytes()).hexdigest() == cache["prediction_sha256"]:
+                rows.extend(cache["rows"])
+                residual_reports.extend(cache["residuals"])
+                continue
+        row_start, residual_start = len(rows), len(residual_reports)
         sample = load(root / entry["path"])
         batch = tensor_sample(sample, scales, device)
 
@@ -287,6 +349,15 @@ def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1):
                     "neural": residuals(sample.ops, neural, ts),
                     "reference": residuals(sample.ops, reference, ts),
                 }
+            )
+        if resume:
+            atomic_json(
+                cache_path,
+                {
+                    "rows": rows[row_start:],
+                    "residuals": residual_reports[residual_start:],
+                    "prediction_sha256": hashlib.sha256(prediction_path.read_bytes()).hexdigest(),
+                },
             )
     atomic_json(output / "per_sample.json", rows)
     atomic_json(output / "summary.json", aggregate(rows))

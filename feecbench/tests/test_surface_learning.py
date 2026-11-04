@@ -378,3 +378,90 @@ def test_directional_features_recover_edge_measurement(samples):
     assert features.shape[1] == 13
     with pytest.raises(ValueError, match="adapter"):
         SurfaceTransolver(adapter="unknown")
+
+
+def test_evaluation_resume_checks_checkpoint_and_prediction_bytes(samples, tmp_path, monkeypatch):
+    import json
+
+    import feecbench.surface.training as training
+
+    root, run, output = tmp_path / "data", tmp_path / "run", tmp_path / "evaluation"
+    entries = []
+    for split in ("train", "validation"):
+        sample = SurfaceSample(**vars(samples[0]))
+        sample.metadata = {**sample.metadata, "config_id": split, "split": split, "family": "pulse", "dt": 0.005}
+        save(root / f"{split}.h5", sample)
+        entries.append({"path": f"{split}.h5", **sample.metadata})
+    atomic_json(root / "index.json", {"fingerprint": "resume-test", "complete": True, "samples": entries})
+    train(root, run, epochs=1, width=16, blocks=1, slices=4)
+    first = training.evaluate(root, run / "best.pt", output, resume=True)
+    original_load = training.load
+    loaded = []
+
+    def tracked_load(path):
+        loaded.append(path)
+        return original_load(path)
+
+    monkeypatch.setattr(training, "load", tracked_load)
+    assert training.evaluate(root, run / "best.pt", output, resume=True) == first
+    assert loaded == []
+    prediction = output / "predictions/validation/medium.npz"
+    prediction.write_bytes(b"interrupted prediction write")
+    repaired = training.evaluate(root, run / "best.pt", output, resume=True)
+    assert len(loaded) == 1
+    assert repaired[0]["metrics"] == first[0]["metrics"]
+    assert len(json.loads((output / "residuals.json").read_text())) == 1
+    with prediction.open("rb") as stream:
+        assert np.load(stream)["pressure"].shape == samples[0].pressure.shape
+    # A valid but different checkpoint cannot reuse old prediction caches.
+    checkpoint = torch.load(run / "best.pt", weights_only=False)
+    checkpoint["epoch"] += 1
+    torch.save(checkpoint, run / "changed.pt")
+    with pytest.raises(ValueError, match="identity mismatch"):
+        training.evaluate(root, run / "changed.pt", output, resume=True)
+
+
+@pytest.mark.parametrize("boundary", ["before_latest", "after_latest", "after_best", "after_history"])
+def test_training_recovers_interrupted_final_epoch(samples, tmp_path, monkeypatch, boundary):
+    import json
+
+    import feecbench.surface.training as training
+
+    root, run = tmp_path / "data", tmp_path / "interrupted"
+    entries = []
+    for split in ("train", "validation"):
+        sample = SurfaceSample(**vars(samples[0]))
+        sample.metadata = {**sample.metadata, "split": split}
+        save(root / f"{split}.h5", sample)
+        entries.append({"path": f"{split}.h5", **sample.metadata})
+    atomic_json(root / "index.json", {"fingerprint": "crash-test", "complete": True, "samples": entries})
+    kwargs = {"epochs": 1, "width": 16, "blocks": 1, "slices": 4}
+    train(root, tmp_path / "reference", **kwargs)
+    save_checkpoint, save_json = training._save_checkpoint, training.atomic_json
+
+    def interrupt_checkpoint(path, value):
+        if boundary == "before_latest" and path.name == "latest.pt":
+            raise RuntimeError("interruption")
+        save_checkpoint(path, value)
+        if (boundary, path.name) in (("after_latest", "latest.pt"), ("after_best", "best.pt")):
+            raise RuntimeError("interruption")
+
+    def interrupt_json(path, value):
+        save_json(path, value)
+        if boundary == "after_history" and path.name == "history.json":
+            raise RuntimeError("interruption")
+
+    monkeypatch.setattr(training, "_save_checkpoint", interrupt_checkpoint)
+    monkeypatch.setattr(training, "atomic_json", interrupt_json)
+    with pytest.raises(RuntimeError, match="interruption"):
+        train(root, run, **kwargs)
+    monkeypatch.setattr(training, "_save_checkpoint", save_checkpoint)
+    monkeypatch.setattr(training, "atomic_json", save_json)
+    train(root, run, resume=(run / "latest.pt").exists(), **kwargs)
+    best = torch.load(run / "best.pt", weights_only=False)
+    expected = torch.load(tmp_path / "reference/best.pt", weights_only=False)
+    assert best["epoch"] == expected["epoch"] == 0
+    assert best["best"] == expected["best"]
+    for key, value in best["model"].items():
+        torch.testing.assert_close(value, expected["model"][key], rtol=0, atol=0)
+    assert len(json.loads((run / "history.json").read_text())) == 1

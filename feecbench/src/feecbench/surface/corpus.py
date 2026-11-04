@@ -15,7 +15,9 @@ from .operators import PYDEC_REVISION, assemble, harmonic_basis
 from .oracle import Midpoint, energy, pressure_modes
 
 
-def generate_corpus(root, manifest, grid=16, dt=0.005, horizon=1.0, snapshots=51, modes=32, paired=False):
+def generate_corpus(
+    root, manifest, grid=16, dt=0.005, horizon=1.0, snapshots=51, modes=32, paired=False, progress=False
+):
     """One configuration at a time; output snapshots do not count as configurations."""
     if dt <= 0 or horizon <= 0 or snapshots < 2 or modes < 2:
         raise ValueError("invalid temporal/spectral configuration")
@@ -42,7 +44,7 @@ def generate_corpus(root, manifest, grid=16, dt=0.005, horizon=1.0, snapshots=51
             raise ValueError("existing corpus configuration hash mismatch; use a new output directory")
     atomic_json(manifest_path, {"fingerprint": fingerprint, "settings": settings, **manifest})
     entries = []
-    for item in manifest["configurations"]:
+    for number, item in enumerate(manifest["configurations"], 1):
         start = time.perf_counter()
         geometry = Geometry(**item["geometry"])
         variants = ["medium"]
@@ -60,6 +62,8 @@ def generate_corpus(root, manifest, grid=16, dt=0.005, horizon=1.0, snapshots=51
                 pending.append((label, path))
         if not pending:
             continue
+        if progress:
+            print(f"Generating configuration {number}/{len(manifest['configurations'])}: {item['split']}", flush=True)
         # A common finer physical reference is used even when only medium is requested.
         meshes = generate(geometry, grid, levels=3)
         rp, rt, rmeta = meshes[-1]

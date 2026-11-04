@@ -8,7 +8,7 @@ that all proposed mesh/frequency ranges are adequately resolved.
 ## Executed validation (2026-11-04)
 
 - Original planar acceptance suite: 40 tests pass.
-- Combined acceptance suite: 81 passed; one CUDA comparison skipped on this Mac.
+- Combined acceptance suite: 89 passed; one CUDA comparison skipped on this Mac.
 - Independent MFEM 4.8 assembly and independently stepped trajectories: all 36 cases
   passed (3 genera × 2 geometries × 3 resolutions × 2 ICs), plus pressure-only and
   stationary-harmonic checks. Maximum relative matrix discrepancy: `6.14e-14`;
@@ -104,6 +104,96 @@ The bridge selects MFEM's own assembly; it is not an alternative hand-coded FEEC
 assembler. Neither backend nor any compiled binary is vendored. Without either
 MFEM route, optional integration tests skip and the full validation command fails
 clearly. `--convergence-only` runs numerical convergence evidence without MFEM.
+
+### Prepared exploratory generalization campaign
+
+This launcher prepares an immutable experiment specification, runs an independent
+numerical audit, generates the full held-out partitions, trains, and evaluates.
+It does not create protocol attestations. The default is an **exploratory** mass
+loss run at seed 0, with the scalar adapter and the original constant learning
+rate. It does not use the balanced/cosine two-case diagnostic objective.
+
+Run from the package directory (`feecbench/feecbench` in the Linux checkout):
+
+```bash
+bash scripts/run_acoustic_campaign.sh prepare
+nohup bash scripts/run_acoustic_campaign.sh run --device cuda > reports/acoustic/generalization-g16/launcher.log 2>&1 &
+tail -f reports/acoustic/generalization-g16/launcher.log
+```
+
+Preparation is cheap and starts no generation or training. The default specification
+has grid 16, `dt=0.002`, `T=1`, 51 regular snapshots, 64 pressure modes, 512 training
+configurations, and 64 each for validation, ID test, geometry OOD and genus-3 OOD.
+The 64 ID test configurations also have coarse, fine and independent remeshed
+variants: **960 HDF5 samples** in the main corpus. Training is on medium meshes
+only, for **200 epochs / 25,600 optimizer updates** with accumulation four.
+Each new run starts from its own fixed seed. All four IC families are included.
+
+Before main-corpus generation, a separate 24-configuration audit covers ID,
+geometry OOD and genus 3, all four families and both familiar genera. Its geometry
+IDs are disjoint from every main partition. It computes timestep-halving and
+fine-grid differences using the same numerical settings. This is a finite sample,
+not exhaustive coverage of the IC parameter range (the audit exact-velocity cases
+use zero initial pressure). The runner records large numerical discrepancies
+without treating them as model failures or manufacturing a passed protocol gate.
+Inspect these errors alongside learning results, especially on shifted shapes.
+
+Every run saves zero/persistence/modal comparisons, regular and off-grid results,
+per-configuration time curves, physical/spectral/Hodge diagnostics, raw predicted
+fields and fixed-query train/validation fitting diagnostics. PDE residuals use
+the existing small subset (one evaluation sample), not every test case. Mean,
+median and p90 configuration errors remain separated by family, genus, split,
+resolution and query type; seed variability is added when multiple seeds exist.
+The comparison is within `T=1`, with fixed `c=1` and the same four IC families.
+It does not test long-time extrapolation, unseen families or new coefficients.
+The genus-3 shift also changes geometry; it is not an isolated topology effect.
+
+After examining training fit and ID controls, expand the **same fixed campaign**:
+
+```bash
+nohup bash scripts/run_acoustic_campaign.sh run --device cuda --stage suite >> reports/acoustic/generalization-g16/launcher.log 2>&1 &
+```
+
+This reuses mass/seed-0 and runs the remaining five mass/MSE seed pairs (seeds 0,
+1, 2). It never changes the budget or selects settings from held-out performance.
+Poor scores are preserved for analysis rather than causing automatic retuning.
+For a nine-run MSE/mass/spectral campaign, prepare a **new directory** using
+`--output ... --protocol reports/protocol.json` with an actual frozen protocol.
+The protocol's numerical settings and eligible pressure bands are applied to
+every objective. The exploratory audit cannot substitute for that protocol.
+
+Useful outputs under `reports/acoustic/generalization-g16/`:
+
+- `campaign.json`: settings, manifests, optimizer update budget, source and lockfile hashes.
+- `audit/reference_uncertainty.json`: numerical differences on the independent audit cases.
+- `progress.json` and `executions.json`: stage completion and execution environments.
+- `runs/mass-seed0/fit.json`: comparable train/validation family scores at fixed queries.
+- `runs/*/evaluation/`: per-sample metrics, physics diagnostics and raw `.npz` predictions.
+- `analysis.json`: completed-run records, family/control tables and seed variability.
+
+Print a compact medium-mesh comparison after any completed run:
+
+```bash
+bash scripts/run_acoustic_campaign.sh summarize
+```
+
+Rerun the same `run` command after interruption; no `--resume` flag is needed.
+Generation resumes at samples, training at committed epochs, evaluation at completed
+cases. Checkpoint hashes and prediction hashes prevent stale evaluation reuse.
+The latest checkpoint embeds the best model and repairs best/history files after
+interrupted writes. A process lock prevents concurrent writers. Logs are also
+kept under `reports/logs/`. Settings, source and lockfile changes are rejected on
+resume; retain the original checkout or prepare another directory for changes.
+Set a different epoch budget only with `prepare --epochs N --output NEW_DIRECTORY`.
+
+For a CPU plumbing check, use `prepare --smoke --output reports/acoustic/campaign-smoke`
+then `run --device cpu --output reports/acoustic/campaign-smoke`. Its shortened
+horizon and tiny model/budget are not scientific performance evidence.
+The local six-run smoke suite completed its independent 12-configuration audit,
+24-configuration campaign (36 mesh samples), training, all evaluation partitions,
+raw predictions, and analysis. Regression tests cover interrupted final-epoch
+checkpoint writes, damaged prediction-cache recovery and changed-checkpoint
+rejection. These checks do not establish a GPU runtime or performance result.
 
 ### Protocol freeze and GPU comparison
 
