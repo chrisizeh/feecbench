@@ -8,7 +8,7 @@ that all proposed mesh/frequency ranges are adequately resolved.
 ## Executed validation (2026-11-04)
 
 - Original planar acceptance suite: 40 tests pass.
-- Combined acceptance suite: 76 passed; one CUDA comparison skipped on this Mac.
+- Combined acceptance suite: 78 passed; one CUDA comparison skipped on this Mac.
 - Independent MFEM 4.8 assembly and independently stepped trajectories: all 36 cases
   passed (3 genera × 2 geometries × 3 resolutions × 2 ICs), plus pressure-only and
   stationary-harmonic checks. Maximum relative matrix discrepancy: `6.14e-14`;
@@ -242,8 +242,9 @@ learning rate and fixed training-derived scales. It jointly fits one training pu
 with `u0=0` and one training exact-velocity case with `p0=0`, at three fixed regular
 times. On each of the same meshes it also trains the exact all-zero solution.
 Thus, fitting by recognizing geometry alone cannot pass the source-response test.
-The objective is explicitly the original mass loss, regardless of the source run's
-objective; this experiment does not introduce family balancing or change the model.
+The default objective is explicitly the original mass loss, regardless of the source run's
+objective. The optional balanced diagnostic described below changes only the fitting
+weights; neither diagnostic changes the model or the benchmark training objectives.
 Every step is an optimizer update, unlike the main loop's accumulated epochs.
 
 `checkpoint_fit.json` contains comparable train/validation errors and source-removal
@@ -254,3 +255,52 @@ fit. Actual cross-field, source-response, and zero-input errors below 10% in bot
 finite-sample fitting only; it does not establish generalization or correct dynamics
 for arbitrary initial conditions. Failure calls for inspecting optimization and the
 adapter before expanding the corpus or reporting a loss comparison.
+
+### Controlled weighting diagnostic
+
+If the original-loss overfit fails, repeat the **same** finite fitting problem with
+`--objective balanced`, using the same source run, seed, query count and update
+budget, and a new output directory:
+
+```bash
+uv run --locked --extra surface python scripts/diagnose_coupling.py overfit --device cuda --root reports/acoustic/development-g16 --run reports/acoustic/dev-g16-mass-seed0 --output reports/acoustic/coupling-g16-balanced --steps 500 --objective balanced
+```
+
+The balanced objective divides each configuration/field's squared mass error per
+area by its fixed mean target energy over the selected nonzero training queries.
+The energy is measured after the original shared field scaling. A documented
+`--energy-floor` (default `1e-6` in these normalized squared units) bounds weights.
+Each zero-input control **inherits its paired nonzero case's denominators**; its
+zero targets never determine a new denominator. Targets, model inputs, architecture,
+shared scales, optimizer settings and initialization remain the same as in the
+mass diagnostic. With no floors active, all-zero predictions have balanced score
+one after averaging the two source cases and their zero controls.
+
+Reports preserve physical and normalized energies, denominators, floor activation,
+weights, pre-clipping gradient norms and clipping frequency. Weight changes also
+change gradient magnitude and clipping, so improvement indicates sensitivity to
+weighting/optimization; it does not uniquely establish the cause of a failure.
+Compare `final_cases` after the **same number of updates** across objectives.
+`cases` contains the separately selected best checkpoint and may come from an
+earlier step. Both outcomes are printed and saved.
+
+This is a diagnostic-only relative loss on two fitting configurations. It is not
+silently added as a fourth benchmark objective, and a successful fit still does
+not demonstrate generalization to new amplitudes, signs, or spatial initial
+conditions. The original full-corpus MSE/mass/spectral comparison is unchanged.
+
+In a local grid-12 matched CPU check (fresh 128-wide, four-block model, three query
+times, seed 0, 500 updates), final source-response errors were:
+
+| Coupling direction | Original mass | Balanced diagnostic |
+| --- | ---: | ---: |
+| Pressure to velocity | 0.9461 | 0.2459 |
+| Velocity to pressure | 0.2534 | 0.4540 |
+
+Neither fit met the 10% diagnostic criterion. Gradient clipping was active on
+93.8% and 95.4% of updates respectively. The effect is a tradeoff: weighting helps
+the weak pressure-to-velocity response while slowing the other direction. This
+supports sensitivity to weighting/optimization, not a completed model fix or a
+claim about grid-16 GPU results. The experiment used the existing grid-12 corpus;
+repeat with the user's own corpus and source-run configuration for a matched local
+comparison. Reports are ignored under `reports/acoustic/coupling-{mass,balanced}-500`.

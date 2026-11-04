@@ -235,6 +235,67 @@ def test_actual_sample_diagnostic_preserves_run_and_uses_training_only(samples, 
     assert {r["split"] for r in report["cases"]} == {"train"}
     assert {r["coupling"]["direction"] for r in report["cases"]} == {"pressure_to_velocity", "velocity_to_pressure"}
     assert report["source_checkpoint_sha256"] == hashlib.sha256(original).hexdigest()
+    balanced = overfit_coupling(
+        root, run, tmp_path / "balanced", steps=2, queries=2, report_every=1, objective="balanced"
+    )
+    assert balanced["objective"] == "balanced"
+    assert balanced["query_indices"] == report["query_indices"]
+    assert balanced["history"][0]["cases"] == report["history"][0]["cases"]
+    assert balanced["history"][0]["mass_score"] == report["history"][0]["mass_score"]
+    assert balanced["history"][0]["objective_score"] != report["history"][0]["objective_score"]
+    assert balanced["final_cases"] == balanced["history"][-1]["cases"]
+    assert balanced["gradient_statistics"]["updates"] == 2
+    assert 0 <= balanced["gradient_statistics"]["clipped_fraction"] <= 1
+    assert len(balanced["energy_records"]) == 2
+    for record in balanced["energy_records"]:
+        for field in ("pressure", "velocity"):
+            assert record[field]["objective_weight"] == 1 / record[field]["denominator"]
     assert (run / "best.pt").read_bytes() == original
     with pytest.raises(ValueError, match="empty"):
         overfit_coupling(root, run, tmp_path / "overfit", steps=1, queries=2)
+
+
+@pytest.mark.parametrize("which", [0, 1])
+def test_balanced_coupling_loss_energies_scaling_and_gradients(samples, which):
+    from feecbench.surface.coupling import coupling_loss, fixed_field_energies
+
+    sample = samples[which]
+    batch = tensor_sample(sample, {"pressure": 1.3, "velocity": 0.7})
+    qs = [1, 2]
+    raw, energies = fixed_field_energies(batch, qs, floor=1e-12)
+    assert not energies.requires_grad
+    assert torch.equal(raw, energies)
+    zero = (torch.zeros_like(batch["p0"]), torch.zeros_like(batch["u0"]))
+    objectives = [
+        coupling_loss(zero, (batch["pressure"][q], batch["velocity"][q]), batch, "balanced", energies) for q in qs
+    ]
+    torch.testing.assert_close(torch.stack(objectives).mean(), torch.tensor(2.0))
+    changed = {**batch, "pressure": batch["pressure"] * 7, "velocity": batch["velocity"] * 0.03}
+    _, changed_energies = fixed_field_energies(changed, qs, floor=1e-12)
+    for q, value in zip(qs, objectives, strict=True):
+        torch.testing.assert_close(
+            value,
+            coupling_loss(
+                zero, (changed["pressure"][q], changed["velocity"][q]), changed, "balanced", changed_energies
+            ),
+        )
+    target = (batch["pressure"][2], batch["velocity"][2])
+    prediction = tuple((0.5 * field).detach().requires_grad_() for field in target)
+    value = coupling_loss(prediction, target, batch, "balanced", energies)
+    value.backward()
+    for i, mass in enumerate((batch["m0"], batch["m1"])):
+        expected = 2 * torch.sparse.mm(mass, (prediction[i].detach() - target[i])[:, None]).squeeze(1)
+        torch.testing.assert_close(prediction[i].grad, expected / batch["area"] / energies[i])
+    # The zero control borrows the source case's denominators, not a floor recomputed on zero targets.
+    torch.testing.assert_close(coupling_loss(target, zero, batch, "balanced", energies), objectives[1])
+    torch.testing.assert_close(
+        coupling_loss(prediction, target, batch, "mass", energies), loss(prediction, target, batch), rtol=0, atol=0
+    )
+    zero_batch = {
+        **batch,
+        "pressure": torch.zeros_like(batch["pressure"]),
+        "velocity": torch.zeros_like(batch["velocity"]),
+    }
+    zero_raw, floored = fixed_field_energies(zero_batch, qs, floor=0.01)
+    torch.testing.assert_close(zero_raw, torch.zeros(2))
+    torch.testing.assert_close(floored, torch.full((2,), 0.01))

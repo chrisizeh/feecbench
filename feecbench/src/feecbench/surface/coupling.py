@@ -19,7 +19,7 @@ import torch
 
 from .data import atomic_json, load
 from .metrics import norm2
-from .model import SurfaceTransolver, loss, tensor_sample
+from .model import SurfaceTransolver, loss, quadratic, tensor_sample
 from .training import _save_checkpoint, device_for
 
 
@@ -197,15 +197,60 @@ def select_overfit_samples(root, entries):
     return [chosen[key] for key in sorted(chosen)]
 
 
-def overfit_coupling(root, run, output, device="cpu", steps=500, queries=3, seed=0, report_every=50):
-    """Fresh model, unchanged architecture/loss/scales, joint pure-source and zero controls.
+def fixed_field_energies(batch, indices, floor=1e-6):
+    """Fixed per-field target energies in normalized units, from fitting queries only.
 
-    Each optimizer update averages both configurations and their zero-input cases.
-    Query times rotate deterministically. Reports evaluate every selected time;
-    the separate best checkpoint uses this fixed training-set mass score only.
+    Both the nonzero case and its zero-input control must reuse these denominators.
+    They are never recomputed from zero targets, predictions, or validation data.
+    """
+    if not np.isfinite(floor) or floor <= 0 or not len(indices):
+        raise ValueError("positive finite energy floor and fitting queries required")
+    raw = torch.stack(
+        [
+            torch.stack([quadratic(batch[field][q], batch[mass]) for q in indices]).mean() / batch["area"]
+            for field, mass in (("pressure", "m0"), ("velocity", "m1"))
+        ]
+    ).detach()
+    if not bool(torch.isfinite(raw).all()) or bool((raw < 0).any()):
+        raise ValueError("invalid target mass energy")
+    return raw, raw.clamp_min(floor)
+
+
+def coupling_loss(prediction, target, batch, objective="mass", energies=None):
+    """Diagnostic-only relative mass loss; original benchmark objectives are unchanged."""
+    if objective == "mass":
+        return loss(prediction, target, batch)
+    if objective != "balanced" or energies is None:
+        raise ValueError("balanced diagnostic requires fixed field-energy denominators")
+    ep, eu = (pred - ref for pred, ref in zip(prediction, target, strict=True))
+    return (quadratic(ep, batch["m0"]) / energies[0] + quadratic(eu, batch["m1"]) / energies[1]) / batch["area"]
+
+
+def _fit_passes(cases):
+    return all(
+        r["coupling"]["response_nrmse"] < 0.1
+        and r["coupling"]["zero_input_output_nrmse"] < 0.1
+        and r["velocity" if r["coupling"]["direction"] == "pressure_to_velocity" else "pressure"]["normalized_rmse"]
+        < 0.1
+        for r in cases
+    )
+
+
+def overfit_coupling(
+    root, run, output, device="cpu", steps=500, queries=3, seed=0, report_every=50, objective="mass", energy_floor=1e-6
+):
+    """Fresh model, fixed architecture/scales, joint pure-source and zero controls.
+
+    The optional balanced objective equalizes relative target-energy errors by
+    case and field. It is a diagnostic, not another benchmark loss variant.
+    Both final-budget and objective-selected best fits are reported separately.
     """
     if steps < 1 or report_every < 1:
         raise ValueError("steps and report_every must be positive")
+    if objective not in ("mass", "balanced"):
+        raise ValueError("diagnostic objective must be mass or balanced")
+    if not np.isfinite(energy_floor) or energy_floor <= 0:
+        raise ValueError("energy floor must be finite and positive")
     device = device_for(device)
     output = Path(output)
     if output.exists() and any(output.iterdir()):
@@ -225,49 +270,86 @@ def overfit_coupling(root, run, output, device="cpu", steps=500, queries=3, seed
     samples = select_overfit_samples(root, index["samples"])
     batches = [tensor_sample(sample, scales, device) for sample in samples]
     indices = [query_indices(sample, queries) for sample in samples]
+    energy_pairs = [fixed_field_energies(batch, qs, energy_floor) for batch, qs in zip(batches, indices, strict=True)]
+    denominators = [pair[1] for pair in energy_pairs]
+    energy_records = []
+    for sample, (raw, denominator) in zip(samples, energy_pairs, strict=True):
+        record = {"config_id": sample.metadata["config_id"]}
+        for i, field in enumerate(("pressure", "velocity")):
+            value, denom = float(raw[i]), float(denominator[i])
+            record[field] = {
+                "target_energy_normalized": value,
+                "target_energy_physical": value * scales[field] ** 2,
+                "denominator": denom,
+                "floor_applied": value < energy_floor,
+                "objective_weight": 1 / denom if objective == "balanced" else 1.0,
+            }
+        energy_records.append(record)
     zero_batches = [
         {**batch, "p0": torch.zeros_like(batch["p0"]), "u0": torch.zeros_like(batch["u0"])} for batch in batches
     ]
-    history, best, best_state = [], float("inf"), None
+    history, best, best_state, best_mass, best_step = [], float("inf"), None, None, None
+    gradient_sum, gradient_max, clipped_updates, updates = 0.0, 0.0, 0, 0
     start = time.perf_counter()
 
+    def gradient_statistics():
+        return {
+            "updates": updates,
+            "preclip_norm_mean": gradient_sum / max(updates, 1),
+            "preclip_norm_max": gradient_max,
+            "clip_threshold": 1.0,
+            "clipped_fraction": clipped_updates / max(updates, 1),
+        }
+
     def measure(step):
-        nonlocal best, best_state
+        nonlocal best, best_state, best_mass, best_step
         model.eval()
-        terms = []
+        terms, mass_terms = [], []
         with torch.no_grad():
-            for batch, zero, qs in zip(batches, zero_batches, indices, strict=True):
+            for batch, zero, qs, denom in zip(batches, zero_batches, indices, denominators, strict=True):
                 for q in qs:
-                    terms.append(
-                        float(
-                            loss(model(batch, batch["times"][q]), (batch["pressure"][q], batch["velocity"][q]), batch)
-                        )
-                    )
-                    terms.append(float(loss(model(zero, batch["times"][q]), (zero["p0"], zero["u0"]), zero)))
+                    for inputs, target in (
+                        (batch, (batch["pressure"][q], batch["velocity"][q])),
+                        (zero, (zero["p0"], zero["u0"])),
+                    ):
+                        prediction = model(inputs, batch["times"][q])
+                        terms.append(float(coupling_loss(prediction, target, inputs, objective, denom)))
+                        mass_terms.append(float(loss(prediction, target, inputs)))
         cases = [inspect_sample(model, s, b, qs, scales) for s, b, qs in zip(samples, batches, indices, strict=True)]
-        score = float(np.mean(terms))
-        if not np.isfinite(score):
+        score, mass_score = float(np.mean(terms)), float(np.mean(mass_terms))
+        if not np.isfinite(score) or not np.isfinite(mass_score):
             raise RuntimeError("nonfinite diagnostic score")
-        history.append({"step": step, "mass_score": score, "cases": cases, "seconds": time.perf_counter() - start})
+        history.append(
+            {
+                "step": step,
+                "objective_score": score,
+                "mass_score": mass_score,
+                "cases": cases,
+                "gradient_statistics": gradient_statistics(),
+                "seconds": time.perf_counter() - start,
+            }
+        )
         if score < best:
-            best = score
+            best, best_mass, best_step = score, mass_score, step
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             _save_checkpoint(
                 output / "best.pt",
                 {
                     "model": best_state,
-                    "settings": {**settings, "objective": "mass"},
+                    "settings": {**settings, "objective": objective},
                     "step": step,
                     "diagnostic_only": True,
-                    "mass_score": score,
+                    "objective_score": score,
+                    "mass_score": mass_score,
+                    "energy_records": energy_records,
+                    "energy_floor": energy_floor,
                 },
             )
         print(
-            f"overfit step={step} mass={score:.6g} "
+            f"overfit step={step} objective={objective} score={score:.6g} mass={mass_score:.6g} "
             + " ".join(
                 f"{r['coupling']['direction']} response={r['coupling']['response_nrmse']:.4f} "
-                f"gain={r['coupling']['response_rms_ratio']:.4f} "
-                f"zero={r['coupling']['zero_input_output_nrmse']:.4f}"
+                f"gain={r['coupling']['response_rms_ratio']:.4f} zero={r['coupling']['zero_input_output_nrmse']:.4f}"
                 for r in cases
             ),
             flush=True,
@@ -278,23 +360,31 @@ def overfit_coupling(root, run, output, device="cpu", steps=500, queries=3, seed
     for step in range(1, steps + 1):
         model.train()
         optimizer.zero_grad()
-        for batch, zero, qs in zip(batches, zero_batches, indices, strict=True):
+        for batch, zero, qs, denom in zip(batches, zero_batches, indices, denominators, strict=True):
             q = qs[(step - 1) % len(qs)]
             for inputs, target in (
                 (batch, (batch["pressure"][q], batch["velocity"][q])),
                 (zero, (zero["p0"], zero["u0"])),
             ):
-                value = loss(model(inputs, batch["times"][q]), target, inputs) / (2 * len(samples))
+                value = coupling_loss(model(inputs, batch["times"][q]), target, inputs, objective, denom) / (
+                    2 * len(samples)
+                )
                 if not torch.isfinite(value):
                     raise RuntimeError("nonfinite overfit loss")
                 value.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        preclip = float(torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True))
+        gradient_sum += preclip
+        gradient_max = max(gradient_max, preclip)
+        clipped_updates += int(preclip > 1.0)
+        updates += 1
         optimizer.step()
         if step % report_every == 0 or step == steps:
             measure(step)
+    final_cases = history[-1]["cases"]
     model.load_state_dict(best_state)
     model.eval()
     cases = [inspect_sample(model, s, b, qs, scales) for s, b, qs in zip(samples, batches, indices, strict=True)]
+    group = optimizer.param_groups[0]
     report = {
         "diagnostic_only": True,
         "initialization": "fresh",
@@ -302,25 +392,32 @@ def overfit_coupling(root, run, output, device="cpu", steps=500, queries=3, seed
         "steps": steps,
         "architecture": architecture,
         "learning_rate": settings["lr"],
-        "objective": "mass",
+        "objective": objective,
         "source_objective": settings["objective"],
         "scales": scales,
+        "energy_records": energy_records,
+        "energy_floor": energy_floor,
+        "gradient_statistics": gradient_statistics(),
+        "optimizer": {
+            "name": "AdamW",
+            "betas": list(group["betas"]),
+            "eps": group["eps"],
+            "weight_decay": group["weight_decay"],
+        },
         "fingerprint": index["fingerprint"],
         "source_checkpoint_sha256": source_sha256,
         "query_indices": [q.tolist() for q in indices],
-        "best_mass_score": best,
+        "best_objective_score": best,
+        "best_mass_score": best_mass,
+        "best_step": best_step,
         "cases": cases,
+        "final_cases": final_cases,
         "history": history,
         "seconds": time.perf_counter() - start,
         "interpretation": "joint finite-sample fitting with exact zero controls; not generalization evidence",
+        "weighting_caveat": "balancing changes gradient magnitudes and clipping; compare fixed-budget final cases",
+        "coupling_fit_below_10_percent": _fit_passes(cases),
+        "final_coupling_fit_below_10_percent": _fit_passes(final_cases),
     }
-    # A diagnostic criterion, not a benchmark protocol acceptance threshold.
-    report["coupling_fit_below_10_percent"] = all(
-        r["coupling"]["response_nrmse"] < 0.1
-        and r["coupling"]["zero_input_output_nrmse"] < 0.1
-        and r["velocity" if r["coupling"]["direction"] == "pressure_to_velocity" else "pressure"]["normalized_rmse"]
-        < 0.1
-        for r in cases
-    )
     atomic_json(output / "report.json", report)
     return report
