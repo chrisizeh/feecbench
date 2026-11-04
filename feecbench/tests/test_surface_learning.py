@@ -167,3 +167,74 @@ def test_cpu_cuda_predictions_and_sparse_gradients(samples):
     loss(gp, (gb["pressure"][1], gb["velocity"][1]), gb).backward()
     for a, b in zip(cpu.parameters(), gpu.parameters(), strict=True):
         torch.testing.assert_close(a.grad, b.grad.cpu(), atol=5e-5, rtol=5e-5)
+
+
+@pytest.mark.parametrize("which", [0, 1])
+def test_coupling_diagnostic_distinguishes_response_from_memorization(samples, which):
+    from feecbench.surface.coupling import inspect_sample, query_indices
+
+    sample = SurfaceSample(**vars(samples[which]))
+    sample.metadata = {**sample.metadata, "family": "pulse" if which == 0 else "exact_velocity"}
+    scales = {"pressure": 1.3, "velocity": 0.7}
+    batch = tensor_sample(sample, scales)
+    indices = query_indices(sample, 2)
+    assert np.all(sample.times[indices] > 0)
+
+    class Replay(torch.nn.Module):
+        def __init__(self, responsive):
+            super().__init__()
+            self.responsive = responsive
+
+        def forward(self, inputs, time):
+            q = int(torch.argmin(torch.abs(batch["times"] - time)))
+            source = "p0" if which == 0 else "u0"
+            amplitude = torch.dot(inputs[source], batch[source]) / torch.dot(batch[source], batch[source])
+            factor = amplitude if self.responsive else 1.0
+            return batch["pressure"][q] * factor, batch["velocity"][q] * factor
+
+    responsive = inspect_sample(Replay(True), sample, batch, indices, scales)
+    memorized = inspect_sample(Replay(False), sample, batch, indices, scales)
+    for row in (responsive, memorized):
+        assert row["pressure"]["normalized_rmse"] < 1e-6
+        assert row["velocity"]["normalized_rmse"] < 1e-6
+    assert responsive["coupling"]["response_nrmse"] < 1e-6
+    assert responsive["coupling"]["zero_input_output_nrmse"] == 0
+    assert responsive["coupling"]["response_alignment"] == pytest.approx(1, abs=1e-6)
+    assert memorized["coupling"]["response_nrmse"] == pytest.approx(1)
+    assert memorized["coupling"]["zero_input_output_nrmse"] == pytest.approx(1)
+    assert memorized["coupling"]["response_rms_ratio"] == 0
+
+
+def test_actual_sample_diagnostic_preserves_run_and_uses_training_only(samples, tmp_path):
+    import hashlib
+
+    from feecbench.surface.coupling import inspect_checkpoint, overfit_coupling
+
+    root, run = tmp_path / "data", tmp_path / "run"
+    entries = []
+    for split in ("train", "validation"):
+        for i, sample in enumerate(samples):
+            sample = SurfaceSample(**vars(sample))
+            sample.metadata = {
+                **sample.metadata,
+                "config_id": f"{split}-{i}",
+                "split": split,
+                "family": "pulse" if i == 0 else "exact_velocity",
+            }
+            path = root / f"{split}-{i}.h5"
+            save(path, sample)
+            entries.append({"path": path.name, **sample.metadata})
+    atomic_json(root / "index.json", {"fingerprint": "diagnostic-test", "complete": True, "samples": entries})
+    train(root, run, epochs=1, width=16, blocks=1, slices=4)
+    original = (run / "best.pt").read_bytes()
+    inspection = inspect_checkpoint(root, run, tmp_path / "inspection.json", queries=2)
+    assert {r["split"] for r in inspection["cases"]} == {"train", "validation"}
+    report = overfit_coupling(root, run, tmp_path / "overfit", steps=2, queries=2, report_every=1)
+    assert report["initialization"] == "fresh"
+    assert len(report["history"]) == 3
+    assert {r["split"] for r in report["cases"]} == {"train"}
+    assert {r["coupling"]["direction"] for r in report["cases"]} == {"pressure_to_velocity", "velocity_to_pressure"}
+    assert report["source_checkpoint_sha256"] == hashlib.sha256(original).hexdigest()
+    assert (run / "best.pt").read_bytes() == original
+    with pytest.raises(ValueError, match="empty"):
+        overfit_coupling(root, run, tmp_path / "overfit", steps=1, queries=2)

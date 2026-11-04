@@ -8,7 +8,7 @@ that all proposed mesh/frequency ranges are adequately resolved.
 ## Executed validation (2026-11-04)
 
 - Original planar acceptance suite: 40 tests pass.
-- Combined acceptance suite: 73 passed; one CUDA comparison skipped on this Mac.
+- Combined acceptance suite: 76 passed; one CUDA comparison skipped on this Mac.
 - Independent MFEM 4.8 assembly and independently stepped trajectories: all 36 cases
   passed (3 genera × 2 geometries × 3 resolutions × 2 ICs), plus pressure-only and
   stationary-harmonic checks. Maximum relative matrix discrepancy: `6.14e-14`;
@@ -215,3 +215,42 @@ The generation implementation is serial and bounded by one physical configuratio
 parallel generation scheduling is a future performance improvement. No Slurm is
 required. Boundary physics, variable coefficients, general commuting transfers,
 full harmonic IC coverage and additional architectures remain outside this run.
+
+## Diagnosing weak pressure–velocity coupling
+
+A small overall pressure error can coexist with failure to generate pressure from
+initial velocity or velocity from initial pressure. Before extending a stalled run,
+inspect identical fixed positive query times on both the training and validation
+configurations. The diagnostic also reports mean-free pressure error and removes
+the sole initial source field in pure-source cases. Its cross-field prediction
+change is compared with the exact corresponding oracle change, including amplitude
+and sign. Correct dynamics give response error zero and response RMS ratio one;
+a model insensitive to the source has response error one and response ratio zero.
+
+From the package directory, after completing development training:
+
+```bash
+uv run --locked --extra surface python scripts/diagnose_coupling.py both --device cuda --root reports/acoustic/development-g16 --run reports/acoustic/dev-g16-mass-seed0 --output reports/acoustic/coupling-g16 --steps 500
+```
+
+Use `--device cpu` without CUDA. `inspect` runs only checkpoint diagnostics;
+`overfit` runs only the controlled fitting experiment. Choose a fresh output
+directory for every invocation. Original data and training checkpoints are read-only.
+
+The overfit experiment initializes a fresh model with the source run's architecture,
+learning rate and fixed training-derived scales. It jointly fits one training pulse
+with `u0=0` and one training exact-velocity case with `p0=0`, at three fixed regular
+times. On each of the same meshes it also trains the exact all-zero solution.
+Thus, fitting by recognizing geometry alone cannot pass the source-response test.
+The objective is explicitly the original mass loss, regardless of the source run's
+objective; this experiment does not introduce family balancing or change the model.
+Every step is an optimizer update, unlike the main loop's accumulated epochs.
+
+`checkpoint_fit.json` contains comparable train/validation errors and source-removal
+responses. `overfit/report.json` records all fixed-query scores, zero-input errors,
+selected configuration identities, checkpoint provenance, and the best diagnostic
+fit. Actual cross-field, source-response, and zero-input errors below 10% in both directions define a
+**diagnostic criterion**, not a scientific protocol gate. Success establishes
+finite-sample fitting only; it does not establish generalization or correct dynamics
+for arbitrary initial conditions. Failure calls for inspecting optimization and the
+adapter before expanding the corpus or reporting a loss comparison.
