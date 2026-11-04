@@ -1,0 +1,15 @@
+[project]
+name = "feecbench-mfem-validation"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "feecbench",
+  "mfem==4.8.0.1",
+  "numpy==2.2.6",
+  "scikit-image>=0.25",
+  "pydec @ git+https://github.com/hirani/pydec.git@c181202c70e79794dcc8fa4577537a4eb4987b2a",
+  "pytest>=7",
+]
+
+[tool.uv.sources]
+feecbench = { path = "..", editable = true }
