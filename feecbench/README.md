@@ -121,3 +121,14 @@ family/level including gmsh meshing; sizes from the built corpus) and extrapolat
 1 000 and 10 000 configurations.
 
 See `DECISIONS.md` for the design choices and conventions.
+
+## Closed-surface acoustic experiment
+
+The additive `feecbench.surface` pipeline implements genus 1–3 Whitney FEEC acoustics,
+independent MFEM validation, versioned development corpora, a slice-attention baseline,
+and direct-terminal CPU/GPU workflows. See [SURFACE_EXPERIMENT.md](SURFACE_EXPERIMENT.md)
+for setup, executed validation, numerical conventions, and the remaining protocol gates.
+
+```bash
+bash scripts/run_acoustic_baseline.sh smoke --device cpu
+```
