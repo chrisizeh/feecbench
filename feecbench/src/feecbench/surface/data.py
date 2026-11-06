@@ -199,3 +199,60 @@ def training_scales(paths, floor=1e-8):
         "training_configurations": count,
         "centering": False,
     }
+
+
+def mse_balance_from_energies(energies, floor=1e-6):
+    """Fixed field weights calibrated to the original MSE zero-predictor loss."""
+    values = np.asarray([energies[f] for f in ("pressure", "velocity")], dtype=np.float64)
+    if not np.isfinite(floor) or floor <= 0 or not np.isfinite(values).all() or np.any(values < 0):
+        raise ValueError("finite nonnegative field energies and positive floor required")
+    if values.sum() <= 0:
+        raise ValueError("entirely zero training energies cannot calibrate field balance")
+    denominators = np.maximum(values, floor)
+    common = float(values.sum() / np.sum(values / denominators))
+    if not np.isfinite(common):
+        raise ValueError("nonfinite field calibration")
+    return {
+        "version": 1,
+        "floor": float(floor),
+        "energies": dict(zip(("pressure", "velocity"), values.tolist(), strict=True)),
+        "denominators": dict(zip(("pressure", "velocity"), denominators.tolist(), strict=True)),
+        "floor_applied": dict(zip(("pressure", "velocity"), (values < floor).tolist(), strict=True)),
+        "common_scale": common,
+        "weights": dict(zip(("pressure", "velocity"), (common / denominators).tolist(), strict=True)),
+    }
+
+
+def training_mse_balance(paths, scales, floor=1e-6):
+    """Equal configuration/time/DoF averaging, only positive regular train-medium targets.
+
+    This is global field balancing, not per-case or per-family target normalization.
+    Original physical field scales remain unchanged for inputs, targets and evaluation.
+    """
+    if any(not np.isfinite(scales[f]) or scales[f] <= 0 for f in ("pressure", "velocity")):
+        raise ValueError("positive finite normalization scales required")
+    totals, records = np.zeros(2), {}
+    for path in paths:
+        sample = load(path)
+        meta = sample.metadata
+        if meta["split"] != "train" or meta["resolution"] != "medium":
+            continue
+        cid = meta["config_id"]
+        if sample.ops.genus == 3 or cid in records:
+            raise ValueError("genus-3 or duplicate training configuration in field calibration")
+        selected = (sample.times > 0) & ~sample.offgrid
+        if not selected.any():
+            raise ValueError("positive regular training targets required")
+        for i, field in enumerate(("pressure", "velocity")):
+            values = getattr(sample, field)[selected].astype(np.float64) / scales[field]
+            totals[i] += np.mean(values**2)
+        records[cid] = {"queries": int(selected.sum()), "fingerprint": meta.get("fingerprint")}
+    if not records:
+        raise ValueError("training medium data required for field calibration")
+    result = mse_balance_from_energies(dict(zip(("pressure", "velocity"), totals / len(records), strict=True)), floor)
+    result.update(
+        scales={f: scales[f] for f in ("pressure", "velocity")},
+        training_configurations=dict(sorted(records.items())),
+        averaging="equal configurations, positive regular times, then coefficients within each field",
+    )
+    return result

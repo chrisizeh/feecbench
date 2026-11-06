@@ -121,7 +121,8 @@ def test_modal_and_residual_diagnostics(samples):
     assert score(sample, frozen_p, frozen_u)["pressure"]["normalized_rmse"] > 0.9
 
 
-def test_resume_exact_epoch_trajectory(samples, tmp_path):
+@pytest.mark.parametrize("objective", ["mass", "mse_balanced"])
+def test_resume_exact_epoch_trajectory(samples, tmp_path, objective):
     root = tmp_path / "data"
     entries = []
     for split in ("train", "validation"):
@@ -132,7 +133,7 @@ def test_resume_exact_epoch_trajectory(samples, tmp_path):
             save(path, sample)
             entries.append({"path": path.name, "split": split, "resolution": "medium"})
     atomic_json(root / "index.json", {"fingerprint": "test", "samples": entries, "complete": True})
-    kwargs = {"width": 16, "blocks": 1, "slices": 4, "accumulation": 3}
+    kwargs = {"width": 16, "blocks": 1, "slices": 4, "accumulation": 3, "objective": objective}
     train(root, tmp_path / "uninterrupted", epochs=2, **kwargs)
     train(root, tmp_path / "resumed", epochs=1, **kwargs)
     train(root, tmp_path / "resumed", epochs=2, resume=True, **kwargs)
@@ -142,6 +143,19 @@ def test_resume_exact_epoch_trajectory(samples, tmp_path):
         torch.testing.assert_close(a["model"][key], b["model"][key], rtol=0, atol=0)
     assert a["best"] == b["best"]
     assert "adapter" not in a["settings"]  # Legacy scalar checkpoints retain their settings identity.
+    if objective == "mse_balanced":
+        assert a["settings"]["field_balance"] == b["settings"]["field_balance"]
+        for row in a["history"]:
+            diagnostics = row["training_diagnostics"]
+            assert sum(diagnostics["weighted_mse"].values()) == pytest.approx(row["training_loss"])
+            assert diagnostics["updates"] == 1
+            assert 0 <= diagnostics["clipped_fraction"] <= 1
+        changed = {**a["settings"]["field_balance"], "floor": 0.01}
+        with pytest.raises(ValueError, match="calibration differs"):
+            train(root, tmp_path / "resumed", epochs=3, resume=True, field_balance=changed, **kwargs)
+    else:
+        assert "field_balance" not in a["settings"]
+        assert "training_diagnostics" not in a["history"][0]
     with pytest.raises(ValueError, match="hash mismatch"):
         train(root, tmp_path / "resumed", epochs=3, resume=True, seed=9, **kwargs)
     assert load(root / "train-0.h5").metadata["split"] == "train"
@@ -419,6 +433,20 @@ def test_evaluation_resume_checks_checkpoint_and_prediction_bytes(samples, tmp_p
     torch.save(checkpoint, run / "changed.pt")
     with pytest.raises(ValueError, match="identity mismatch"):
         training.evaluate(root, run / "changed.pt", output, resume=True)
+    assert "splits" not in json.loads((output / "identity.json").read_text())
+    with pytest.raises(ValueError, match="identity mismatch"):
+        training.evaluate(root, run / "best.pt", output, resume=True, splits=["validation"])
+    # The filtered evaluation must never load the deliberately nonexistent test sample.
+    entries.append({**entries[-1], "split": "id_test", "path": "unavailable-test.h5", "config_id": "test"})
+    atomic_json(root / "index.json", {"fingerprint": "resume-test", "complete": True, "samples": entries})
+    filtered = tmp_path / "validation-only"
+    rows = training.evaluate(root, run / "best.pt", filtered, resume=True, splits=["validation", "validation"])
+    assert {r["split"] for r in rows} == {"validation"}
+    assert json.loads((filtered / "identity.json").read_text())["splits"] == ["validation"]
+    assert training.evaluate(root, run / "best.pt", filtered, resume=True, splits=("validation",)) == rows
+    for splits in ([], ["train"], ["not-a-split"], "validation"):
+        with pytest.raises(ValueError, match="split"):
+            training.evaluate(root, run / "best.pt", tmp_path / "invalid-filter", splits=splits)
 
 
 @pytest.mark.parametrize("boundary", ["before_latest", "after_latest", "after_best", "after_history"])

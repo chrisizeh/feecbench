@@ -125,3 +125,13 @@ Design and implementation choices behind feecbench, with the reasoning for each.
     the best model and history to recover interrupted epoch commits; evaluation
     caches are bound to checkpoint and prediction hashes. See the campaign commands
     in `SURFACE_EXPERIMENT.md`.
+
+22. **Balanced MSE isolates global field weighting.** Fixed weights come only from
+    medium training targets at positive regular times, with equal configuration,
+    time and coefficient averaging. A common multiplier preserves the original
+    MSE zero-prediction expectation; it does not equalize gradients or optimization.
+    This is separate from the per-case balanced coupling diagnostic. The loss study
+    imports immutable completed MSE/mass controls, preserves the original sampler
+    and model, and selects checkpoints using the existing validation mass score.
+    Its automatic evaluation is restricted to validation; a future generalization
+    study requires a separate decision after fitting behavior is understood.

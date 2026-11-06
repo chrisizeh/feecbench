@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .data import atomic_json, digest, load, training_scales
+from .data import atomic_json, digest, load, training_mse_balance, training_scales
 from .metrics import aggregate, residuals, score
 from .model import SurfaceTransolver, forward_features, loss, tensor_sample
 from .oracle import Midpoint, ModalControl
@@ -48,6 +48,7 @@ def train(
     spectral_weight=1.0,
     adapter="scalar",
     progress=False,
+    field_balance=None,
 ):
     device = device_for(device)
     if epochs < 1 or accumulation < 1:
@@ -63,6 +64,13 @@ def train(
     if not train_paths or not validation_paths:
         raise ValueError("training and independent validation configurations required")
     scales = training_scales(train_paths)
+    if objective == "mse_balanced":
+        measured_balance = training_mse_balance(train_paths, scales)
+        if field_balance is not None and field_balance != measured_balance:
+            raise ValueError("fixed field calibration differs from training data")
+        field_balance = measured_balance
+    elif field_balance is not None:
+        raise ValueError("field_balance is only supported with mse_balanced")
     settings = {
         "seed": seed,
         "objective": objective,
@@ -81,6 +89,8 @@ def train(
     # Preserve the exact legacy scalar settings/hash so old runs still resume.
     if adapter != "scalar":
         settings["adapter"] = adapter
+    if field_balance is not None:
+        settings["field_balance"] = field_balance
     identity = digest(settings)
     random.seed(seed)
     np.random.seed(seed)
@@ -149,6 +159,8 @@ def train(
         model.train()
         optimizer.zero_grad()
         running = 0.0
+        mse_totals = np.zeros(2)
+        gradient_sum, gradient_max, clipped, updates = 0.0, 0.0, 0, 0
         order = rng.permutation(len(train_paths))
         for i, index_ in enumerate(order):
             sample = load(train_paths[index_])
@@ -163,6 +175,7 @@ def train(
                 objective,
                 bands,
                 spectral_weight,
+                field_balance=field_balance,
             )
             if not torch.isfinite(value):
                 raise RuntimeError("nonfinite training loss")
@@ -170,8 +183,20 @@ def train(
             group_size = min(accumulation, len(order) - (i // accumulation) * accumulation)
             (value / group_size).backward()
             running += float(value.detach())
+            if field_balance is not None:
+                targets = (batch["pressure"][query], batch["velocity"][query])
+                mse_totals += [
+                    float((p.detach() - t).square().mean()) for p, t in zip(prediction, targets, strict=True)
+                ]
             if (i + 1) % accumulation == 0 or i + 1 == len(order):
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                if field_balance is None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                else:
+                    norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True))
+                    gradient_sum += norm
+                    gradient_max = max(gradient_max, norm)
+                    clipped += int(norm > 1.0)
+                    updates += 1
                 optimizer.step()
                 optimizer.zero_grad()
         model.eval()
@@ -205,6 +230,17 @@ def train(
                 "seconds": time.perf_counter() - start,
             }
         )
+        if field_balance is not None:
+            terms = dict(zip(("pressure", "velocity"), (mse_totals / len(order)).tolist(), strict=True))
+            history[-1]["training_diagnostics"] = {
+                "unweighted_mse": terms,
+                "weighted_mse": {f: v * field_balance["weights"][f] for f, v in terms.items()},
+                "updates": updates,
+                "preclip_norm_mean": gradient_sum / updates,
+                "preclip_norm_max": gradient_max,
+                "clip_threshold": 1.0,
+                "clipped_fraction": clipped / updates,
+            }
         checkpoint = {
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -228,7 +264,7 @@ def train(
     return output / "best.pt"
 
 
-def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1, resume=False):
+def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1, resume=False, splits=None):
     device = device_for(device)
     root, output = Path(root), Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -237,6 +273,13 @@ def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1, res
     index = json.loads((root / "index.json").read_text())
     if index["fingerprint"] != settings["fingerprint"]:
         raise ValueError("evaluation corpus differs from checkpoint manifest")
+    if splits is not None:
+        if isinstance(splits, str):
+            raise ValueError("splits must be a nonempty collection of evaluation split names")
+        splits = sorted(set(splits))
+        allowed = {"validation", "id_test", "geometry_ood", "topology_ood"}
+        if not splits or not set(splits) <= allowed or not set(splits) <= {e["split"] for e in index["samples"]}:
+            raise ValueError("unknown, empty or unavailable evaluation splits")
     if resume:
         import hashlib
 
@@ -246,6 +289,8 @@ def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1, res
             "residual_subset": residual_subset,
             "evaluation_version": 1,
         }
+        if splits is not None:
+            identity["splits"] = splits  # Preserve the exact legacy identity when no filter is requested.
         identity_path = output / "identity.json"
         if identity_path.exists():
             if json.loads(identity_path.read_text()) != identity:
@@ -262,6 +307,8 @@ def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1, res
     scales, rows, residual_reports = settings["scales"], [], []
     for entry in index["samples"]:
         if entry["split"] in ("train", "verification"):
+            continue
+        if splits is not None and entry["split"] not in splits:
             continue
         prediction_path = output / "predictions" / entry["config_id"] / f"{entry['resolution']}.npz"
         cache_path = output / "cache" / entry["config_id"] / f"{entry['resolution']}.json"

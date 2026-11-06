@@ -136,10 +136,17 @@ def quadratic(error, mass):
     return torch.dot(error, torch.sparse.mm(mass, error[:, None]).squeeze(1))
 
 
-def loss(prediction, target, batch, objective="mass", bands=None, spectral_weight=1.0):
+def loss(prediction, target, batch, objective="mass", bands=None, spectral_weight=1.0, field_balance=None):
     ep, eu = (p - t for p, t in zip(prediction, target, strict=True))
     if objective == "mse":
         return ep.square().mean() + eu.square().mean()
+    if objective == "mse_balanced":
+        if field_balance is None:
+            raise ValueError("mse_balanced requires fixed training-derived weights")
+        weights = [field_balance["weights"][f] for f in ("pressure", "velocity")]
+        if any(not np.isfinite(w) or w <= 0 for w in weights):
+            raise ValueError("positive finite field weights required")
+        return weights[0] * ep.square().mean() + weights[1] * eu.square().mean()
     if objective not in ("mass", "spectral"):
         raise ValueError("unknown loss")
     spatial = (quadratic(ep, batch["m0"]) + quadratic(eu, batch["m1"])) / batch["area"]

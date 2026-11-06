@@ -8,7 +8,7 @@ that all proposed mesh/frequency ranges are adequately resolved.
 ## Executed validation (2026-11-04)
 
 - Original planar acceptance suite: 40 tests pass.
-- Combined acceptance suite: 89 passed; one CUDA comparison skipped on this Mac.
+- Combined acceptance suite: 98 passed; one CUDA comparison skipped on this Mac.
 - Independent MFEM 4.8 assembly and independently stepped trajectories: all 36 cases
   passed (3 genera × 2 geometries × 3 resolutions × 2 ICs), plus pressure-only and
   stationary-harmonic checks. Maximum relative matrix discrepancy: `6.14e-14`;
@@ -194,6 +194,81 @@ The local six-run smoke suite completed its independent 12-configuration audit,
 raw predictions, and analysis. Regression tests cover interrupted final-epoch
 checkpoint writes, damaged prediction-cache recovery and changed-checkpoint
 rejection. These checks do not establish a GPU runtime or performance result.
+
+### Field-balanced MSE: reuse the six completed controls
+
+The separate loss study tests global pressure/velocity weighting before adding
+spectral losses. It references a completed six-run campaign read-only and trains
+three fresh `mse_balanced` models, using the same seeds, scalar architecture,
+normalization, constant learning rate, accumulation, epoch budget and validation
+mass checkpoint-selection score. For the full campaign this is 200 epochs and
+25,600 updates per model. It generates no new corpus and evaluates only training
+fits and validation cases. Existing ID and OOD results do not select the weights.
+
+From the package directory on the machine containing the full campaign:
+
+```bash
+bash scripts/run_loss_balance.sh prepare
+bash scripts/run_loss_balance.sh run --device cuda
+```
+
+Run the second command inside tmux for an unattended job. Both commands save
+timestamped logs under `reports/logs/`. The default source is
+`reports/acoustic/generalization-g16`, and the new study is saved separately in
+`reports/acoustic/loss-balance-g16`. Override these during preparation with
+`--source-campaign PATH --output NEW_DIRECTORY`; use that same output for run and
+summarize. Preparation needs the full source campaign, its HDF5 files and all six
+completed run directories, not just the exported `analysis.json`.
+
+For each field, calculate `E_f`, the equal-configuration mean of squared normalized
+target coefficients, averaging equally over positive regular times and coefficients
+within each mesh. Use only medium-resolution training samples. Set
+`d_f = max(E_f, 1e-6)` and
+`a = (E_p + E_u) / (E_p / d_p + E_u / d_u)`. The new objective is
+`a * (mean(ep**2) / d_p + mean(eu**2) / d_u)`.
+
+When neither floor is active, the two fields have equal expected contributions
+for zero prediction. The common multiplier preserves the original MSE's expected
+zero-prediction total, including when a floor is active. This calibration does not
+match the initial model loss, gradients, clipping or optimizer trajectories.
+Weights are fixed globally, without per-case or per-family normalization. The
+existing physical scales and raw-field evaluation remain unchanged. This objective
+is distinct from `--objective balanced` in the two-case coupling diagnostic.
+
+Preparation verifies the parent campaign hash, all six completed artifact chains,
+matching budgets/settings/scales and the fixed-query fitting rule. The new study
+records the original sources and hashes of its training/validation data and control
+artifacts, plus its own current source identity. The old campaign's source guard
+remains unchanged: importing its completed evidence is not resuming it under new
+code. Source artifacts are never rewritten. Changed parent data or study settings
+are rejected on resume. The study output must not overlap the parent directory.
+
+Rerun the same `run` command after interruption. All three seeds resume automatically,
+with checkpoint-bound, validation-only prediction caches. Print the paired results:
+
+```bash
+bash scripts/run_loss_balance.sh summarize
+```
+
+The new `analysis.json` contains:
+
+- Fixed calibration energies, floors, weights and training-configuration provenance.
+- `fit_comparison`: identical three-query train/validation family scores for the
+  three objectives, per-seed values, seed variability and paired differences from
+  each historical control. Negative differences indicate lower error.
+- `validation_evaluation`: regular/off-grid metrics by family, genus and method;
+  these use their own query sets and are separate from the fixed-query fits.
+- Per-epoch unweighted/weighted field MSEs and pre-clipping gradient statistics for
+  the new models. Historical gradient diagnostics are explicitly unavailable.
+
+The criterion is whether balanced MSE improves velocity over MSE and approaches
+mass-loss accuracy, with any pressure trade-off reported. A negative result is still
+valid evidence. No Fourier term, architecture change or new OOD evaluation is added.
+The pre-existing `spectral` objective remains separately gated by a frozen protocol.
+The three-run CPU loss-study smoke and completed-run resume both passed. Replaying
+all six original CPU smoke controls under the updated implementation reproduced
+their model tensors, settings identities and validation scores exactly. These are
+compatibility/plumbing checks, not evidence that balanced MSE improves full-run fit.
 
 ### Protocol freeze and GPU comparison
 

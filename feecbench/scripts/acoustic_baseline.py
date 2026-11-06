@@ -27,7 +27,7 @@ def main():
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--protocol", type=Path)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--objective", choices=("mse", "mass", "spectral"), default="mass")
+    parser.add_argument("--objective", choices=("mse", "mse_balanced", "mass", "spectral"), default="mass")
     parser.add_argument("--epochs", type=int)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--grid", type=int)
