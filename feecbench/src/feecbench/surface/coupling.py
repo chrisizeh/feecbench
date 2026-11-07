@@ -108,12 +108,12 @@ def inspect_sample(model, sample, batch, indices, scales, floor=1e-8):
     return row
 
 
-def _context(root, run, device):
+def _context(root, run, device, checkpoint_path=None):
     root, run = Path(root), Path(run)
     index = json.loads((root / "index.json").read_text())
     if index.get("complete") is not True:
         raise ValueError("diagnostics require a complete corpus")
-    checkpoint_bytes = (run / "best.pt").read_bytes()
+    checkpoint_bytes = (Path(checkpoint_path) if checkpoint_path is not None else run / "best.pt").read_bytes()
     checkpoint = torch.load(io.BytesIO(checkpoint_bytes), map_location="cpu", weights_only=False)
     checkpoint["diagnostic_source_sha256"] = hashlib.sha256(checkpoint_bytes).hexdigest()
     settings = checkpoint["settings"]
@@ -126,10 +126,10 @@ def _context(root, run, device):
     return index, checkpoint, model
 
 
-def inspect_checkpoint(root, run, output, device="cpu", queries=3):
+def inspect_checkpoint(root, run, output, device="cpu", queries=3, checkpoint_path=None):
     device = device_for(device)
     root = Path(root)
-    index, checkpoint, model = _context(root, run, device)
+    index, checkpoint, model = _context(root, run, device, checkpoint_path=checkpoint_path)
     model.eval()
     scales = checkpoint["settings"]["scales"]
     rows = []

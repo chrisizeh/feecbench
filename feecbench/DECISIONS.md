@@ -135,3 +135,12 @@ Design and implementation choices behind feecbench, with the reasoning for each.
     and model, and selects checkpoints using the existing validation mass score.
     Its automatic evaluation is restricted to validation; a future generalization
     study requires a separate decision after fitting behavior is understood.
+
+23. **Continuation comparisons pair optimizer state and additional budget.** Each
+    balanced-MSE seed forks its original latest checkpoint into constant and cosine
+    LR branches, preserving optimizer, RNG, sampler epoch and history. Cosine steps
+    after optimizer updates across a fixed additional budget; its state is saved
+    with the authoritative latest checkpoint. Original runs remain immutable.
+    Best selection includes the parent history and explicitly labels inherited
+    winners; final-budget checkpoints are evaluated separately. Both roles use
+    train/validation diagnostics only, with no new OOD evaluation.

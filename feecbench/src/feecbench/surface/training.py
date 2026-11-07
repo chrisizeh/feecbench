@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 import time
@@ -49,6 +50,7 @@ def train(
     adapter="scalar",
     progress=False,
     field_balance=None,
+    continuation=None,
 ):
     device = device_for(device)
     if epochs < 1 or accumulation < 1:
@@ -91,6 +93,20 @@ def train(
         settings["adapter"] = adapter
     if field_balance is not None:
         settings["field_balance"] = field_balance
+    if continuation is not None:
+        if (
+            not resume
+            or continuation["source_identity"] != digest(settings)
+            or continuation["schedule"] not in ("constant", "cosine")
+            or continuation["start_epoch"] < 1
+            or continuation["additional_epochs"] < 1
+            or continuation["updates_per_epoch"] != math.ceil(len(train_paths) / accumulation)
+            or epochs != continuation["start_epoch"] + continuation["additional_epochs"]
+            or not 0 < continuation["final_lr_ratio"] <= 1
+            or (continuation["schedule"] == "constant" and continuation["final_lr_ratio"] != 1)
+        ):
+            raise ValueError("invalid continuation identity, schedule or fixed budget")
+        settings["continuation"] = continuation
     identity = digest(settings)
     random.seed(seed)
     np.random.seed(seed)
@@ -143,6 +159,41 @@ def train(
             torch.cuda.set_rng_state_all([s.cpu() for s in checkpoint["cuda_rng"]])
     elif latest.exists():
         raise ValueError("run exists; use --resume or a new output directory")
+    scheduler, continuation_updates = None, 0
+    if continuation is not None:
+        expected_updates = (start_epoch - continuation["start_epoch"]) * continuation["updates_per_epoch"]
+        continuation_updates = checkpoint["continuation_updates"]
+        if expected_updates < 0 or continuation_updates != expected_updates:
+            raise ValueError("continuation update counter differs from committed epochs")
+        if continuation["schedule"] == "cosine":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=continuation["additional_epochs"] * continuation["updates_per_epoch"],
+                eta_min=lr * continuation["final_lr_ratio"],
+            )
+            if continuation_updates:
+                if checkpoint.get("scheduler") is None:
+                    raise ValueError("missing continuation scheduler state")
+                scheduler.load_state_dict(checkpoint["scheduler"])
+            if scheduler.last_epoch != continuation_updates:
+                raise ValueError("scheduler progress differs from continuation updates")
+            expected_total = continuation["additional_epochs"] * continuation["updates_per_epoch"]
+            minimum_lr = lr * continuation["final_lr_ratio"]
+            expected_lr = (
+                minimum_lr + (lr - minimum_lr) * (1 + math.cos(math.pi * continuation_updates / expected_total)) / 2
+            )
+            if (
+                scheduler.T_max != expected_total
+                or scheduler.eta_min != minimum_lr
+                or any(
+                    not math.isclose(g["lr"], expected_lr, rel_tol=1e-10, abs_tol=1e-15) for g in optimizer.param_groups
+                )
+            ):
+                raise ValueError("restored cosine settings or optimizer learning rate mismatch")
+        elif checkpoint.get("scheduler") is not None:
+            raise ValueError("constant continuation cannot restore a scheduler")
+        elif any(g["lr"] != lr for g in optimizer.param_groups):
+            raise ValueError("constant continuation learning rate mismatch")
     atomic_json(
         output / "configuration.json",
         {
@@ -161,6 +212,7 @@ def train(
         running = 0.0
         mse_totals = np.zeros(2)
         gradient_sum, gradient_max, clipped, updates = 0.0, 0.0, 0, 0
+        first_lr = last_lr = optimizer.param_groups[0]["lr"]
         order = rng.permutation(len(train_paths))
         for i, index_ in enumerate(order):
             sample = load(train_paths[index_])
@@ -197,7 +249,12 @@ def train(
                     gradient_max = max(gradient_max, norm)
                     clipped += int(norm > 1.0)
                     updates += 1
+                last_lr = optimizer.param_groups[0]["lr"]
                 optimizer.step()
+                if continuation is not None:
+                    continuation_updates += 1
+                    if scheduler is not None:
+                        scheduler.step()
                 optimizer.zero_grad()
         model.eval()
         validation = []
@@ -241,6 +298,13 @@ def train(
                 "clip_threshold": 1.0,
                 "clipped_fraction": clipped / updates,
             }
+        if continuation is not None:
+            history[-1]["continuation"] = {
+                "updates": continuation_updates,
+                "first_learning_rate_used": first_lr,
+                "last_learning_rate_used": last_lr,
+                "next_learning_rate": optimizer.param_groups[0]["lr"],
+            }
         checkpoint = {
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -255,6 +319,10 @@ def train(
             "torch_rng": torch.get_rng_state(),
             "cuda_rng": torch.cuda.get_rng_state_all() if device.type == "cuda" else None,
         }
+        if continuation is not None:
+            checkpoint.update(
+                continuation_updates=continuation_updates, scheduler=scheduler.state_dict() if scheduler else None
+            )
         _save_checkpoint(latest, checkpoint)
         if improved:
             _save_checkpoint(output / "best.pt", checkpoint)

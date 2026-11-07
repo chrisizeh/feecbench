@@ -493,3 +493,167 @@ def test_training_recovers_interrupted_final_epoch(samples, tmp_path, monkeypatc
     for key, value in best["model"].items():
         torch.testing.assert_close(value, expected["model"][key], rtol=0, atol=0)
     assert len(json.loads((run / "history.json").read_text())) == 1
+
+
+def test_continuation_pairing_constant_equivalence_and_cosine_resume(samples, tmp_path, monkeypatch):
+    import math
+
+    import feecbench.surface.training as training
+    from feecbench.surface.campaign import file_hash
+    from feecbench.surface.continuation import initialize_branch
+
+    def same_tree(left, right):
+        if isinstance(left, torch.Tensor):
+            torch.testing.assert_close(left, right, rtol=0, atol=0)
+        elif isinstance(left, np.ndarray):
+            np.testing.assert_array_equal(left, right)
+        elif isinstance(left, dict):
+            assert left.keys() == right.keys()
+            for key in left:
+                same_tree(left[key], right[key])
+        elif isinstance(left, (list, tuple)):
+            assert len(left) == len(right)
+            for a, b in zip(left, right, strict=True):
+                same_tree(a, b)
+        else:
+            assert left == right
+
+    root, source = tmp_path / "data", tmp_path / "source"
+    entries = []
+    for split in ("train", "validation"):
+        for number, original in enumerate(samples):
+            sample = SurfaceSample(**vars(original))
+            sample.metadata = {**sample.metadata, "split": split, "config_id": f"{split}-{number}"}
+            path = root / f"{split}-{number}.h5"
+            save(path, sample)
+            entries.append({"path": path.name, **sample.metadata})
+    atomic_json(root / "index.json", {"fingerprint": "continuation-test", "complete": True, "samples": entries})
+    kwargs = {"width": 16, "blocks": 1, "slices": 4, "accumulation": 1, "objective": "mse_balanced"}
+    train(root, source, epochs=1, **kwargs)
+    source_path = source / "latest.pt"
+    source_hash = file_hash(source_path)
+    original = torch.load(source_path, weights_only=False)
+    policy = {
+        "source_checkpoint_sha256": source_hash,
+        "source_identity": original["identity"],
+        "start_epoch": 1,
+        "additional_epochs": 2,
+        "updates_per_epoch": 2,
+        "schedule": "constant",
+        "final_lr_ratio": 1.0,
+    }
+    cosine = {**policy, "schedule": "cosine", "final_lr_ratio": 0.01}
+    pending = tmp_path / "pending-bootstrap"
+    pending.mkdir()
+    (pending / "latest.pending").write_bytes(b"interrupted first checkpoint write")
+    initialize_branch(source_path, pending, policy)
+    assert (pending / "latest.pt").exists() and not (pending / "latest.pending").exists()
+    for name, settings in (("constant", policy), ("cosine", cosine), ("interrupted", cosine)):
+        initialize_branch(source_path, tmp_path / name, settings)
+        fork = torch.load(tmp_path / name / "latest.pt", weights_only=False)
+        for key in ("model", "optimizer", "numpy_rng", "torch_rng", "cuda_rng", "history", "best_model", "best_epoch"):
+            same_tree(original[key], fork[key])
+    train(root, tmp_path / "direct", epochs=3, **kwargs)
+    train(root, tmp_path / "constant", epochs=3, resume=True, continuation=policy, **kwargs)
+    direct = torch.load(tmp_path / "direct/latest.pt", weights_only=False)
+    constant = torch.load(tmp_path / "constant/latest.pt", weights_only=False)
+    for key in ("model", "optimizer", "numpy_rng", "torch_rng", "best_model", "best_epoch"):
+        same_tree(direct[key], constant[key])
+    assert [r["validation_mass_score"] for r in direct["history"]] == [
+        r["validation_mass_score"] for r in constant["history"]
+    ]
+    train(root, tmp_path / "cosine", epochs=3, resume=True, continuation=cosine, **kwargs)
+    save_checkpoint = training._save_checkpoint
+
+    def interrupt(path, checkpoint):
+        save_checkpoint(path, checkpoint)
+        if path.name == "latest.pt" and checkpoint["epoch"] == 1:
+            raise RuntimeError("interrupt after first continuation epoch")
+
+    monkeypatch.setattr(training, "_save_checkpoint", interrupt)
+    with pytest.raises(RuntimeError, match="interrupt"):
+        train(root, tmp_path / "interrupted", epochs=3, resume=True, continuation=cosine, **kwargs)
+    monkeypatch.setattr(training, "_save_checkpoint", save_checkpoint)
+    train(root, tmp_path / "interrupted", epochs=3, resume=True, continuation=cosine, **kwargs)
+    expected = torch.load(tmp_path / "cosine/latest.pt", weights_only=False)
+    resumed = torch.load(tmp_path / "interrupted/latest.pt", weights_only=False)
+    for key in (
+        "model",
+        "optimizer",
+        "numpy_rng",
+        "torch_rng",
+        "best_model",
+        "best_epoch",
+        "scheduler",
+        "continuation_updates",
+    ):
+        same_tree(expected[key], resumed[key])
+    assert resumed["continuation_updates"] == resumed["scheduler"]["last_epoch"] == 4
+    assert resumed["optimizer"]["param_groups"][0]["lr"] == pytest.approx(1e-5)
+    assert resumed["history"][1]["continuation"]["first_learning_rate_used"] == 0.001
+    last_used = 1e-5 + (0.001 - 1e-5) * (1 + math.cos(math.pi * 3 / 4)) / 2
+    assert resumed["history"][-1]["continuation"]["last_learning_rate_used"] == pytest.approx(last_used)
+    assert file_hash(source_path) == source_hash
+    # Reinitialization cannot overwrite progress, and a different budget cannot reuse the branch.
+    before = file_hash(tmp_path / "cosine/latest.pt")
+    initialize_branch(source_path, tmp_path / "cosine", cosine)
+    assert file_hash(tmp_path / "cosine/latest.pt") == before
+    with pytest.raises(ValueError, match="different continuation"):
+        initialize_branch(source_path, tmp_path / "cosine", {**cosine, "additional_epochs": 3})
+    with pytest.raises(ValueError, match="fixed budget"):
+        train(root, tmp_path / "cosine", epochs=4, resume=True, continuation=cosine, **kwargs)
+    # State corruption cannot silently reset the LR or scheduler on resume.
+    resumed["optimizer"]["param_groups"][0]["lr"] = 0.001
+    torch.save(resumed, tmp_path / "interrupted/latest.pt")
+    with pytest.raises(ValueError, match="learning rate mismatch"):
+        train(root, tmp_path / "interrupted", epochs=3, resume=True, continuation=cosine, **kwargs)
+
+
+def test_continuation_initial_fit_provenance(tmp_path, monkeypatch):
+    from feecbench.surface import continuation
+    from feecbench.surface.campaign import file_hash
+    from feecbench.surface.data import atomic_json
+
+    specification = {
+        "seeds": [{"seed": 0, "source_checkpoint_sha256": "source", "start_epoch": 200}],
+        "hash": "study",
+        "source_study_hash": "parent",
+        "status": "test",
+        "selection": "best and final",
+        "additional_epochs": 200,
+    }
+    monkeypatch.setattr(continuation, "read_continuation", lambda *a, **kw: specification)
+    path = tmp_path / "initial/seed0.json"
+    fit = {
+        "source_checkpoint_sha256": "source",
+        "checkpoint_epoch": 199,
+        "queries_per_configuration": 3,
+        "summary": [{"pressure": 0.5}],
+    }
+
+    def commit():
+        atomic_json(path, fit)
+        atomic_json(
+            tmp_path / "progress.json",
+            {"initial-fit-0": {"state": "complete", "artifacts": {"initial/seed0.json": file_hash(path)}}},
+        )
+
+    # A result written before stage completion must not enter the comparison.
+    atomic_json(path, fit)
+    assert continuation.summarize_continuation(tmp_path)["source_seeds"][0]["latest_fit_summary"] is None
+    commit()
+    assert continuation.summarize_continuation(tmp_path)["source_seeds"][0]["latest_fit_summary"] == fit["summary"]
+    atomic_json(path, {**fit, "summary": []})
+    with pytest.raises(ValueError, match="artifact hash"):
+        continuation.summarize_continuation(tmp_path)
+    for field, value in (
+        ("source_checkpoint_sha256", "other"),
+        ("checkpoint_epoch", 183),
+        ("queries_per_configuration", 1),
+    ):
+        original = fit[field]
+        fit[field] = value
+        commit()
+        with pytest.raises(ValueError, match="source latest checkpoint"):
+            continuation.summarize_continuation(tmp_path)
+        fit[field] = original

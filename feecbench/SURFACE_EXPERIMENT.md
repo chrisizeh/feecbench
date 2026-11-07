@@ -8,7 +8,7 @@ that all proposed mesh/frequency ranges are adequately resolved.
 ## Executed validation (2026-11-04)
 
 - Original planar acceptance suite: 40 tests pass.
-- Combined acceptance suite: 98 passed; one CUDA comparison skipped on this Mac.
+- Combined acceptance suite: 100 passed; one CUDA comparison skipped on this Mac.
 - Independent MFEM 4.8 assembly and independently stepped trajectories: all 36 cases
   passed (3 genera × 2 geometries × 3 resolutions × 2 ICs), plus pressure-only and
   stationary-harmonic checks. Maximum relative matrix discrepancy: `6.14e-14`;
@@ -269,6 +269,61 @@ The three-run CPU loss-study smoke and completed-run resume both passed. Replayi
 all six original CPU smoke controls under the updated implementation reproduced
 their model tensors, settings identities and validation scores exactly. These are
 compatibility/plumbing checks, not evidence that balanced MSE improves full-run fit.
+
+### Paired extra-budget continuation
+
+Continue the three completed balanced-MSE seeds with two schedules each. Both
+branches start from the same original `latest.pt`, preserving AdamW state, RNG
+state, history and the embedded best model. The default adds 200 epochs / 25,600
+optimizer updates per branch: 400 epochs / 51,200 updates including the parent.
+One branch keeps LR 0.001; the other applies cosine decay toward 0.00001 over the
+additional updates. The model, objective, field weights and query sampler stay fixed.
+
+On the machine containing the complete loss study and its source campaign, from
+the package directory:
+
+```bash
+bash scripts/run_loss_continuation.sh prepare
+bash scripts/run_loss_continuation.sh run --device cuda
+```
+
+The source defaults to `reports/acoustic/loss-balance-g16`; the six new runs go to
+`reports/acoustic/loss-continuation-g16`. Preparation accepts `--source-study PATH`,
+`--output NEW_DIRECTORY` and `--additional-epochs N`. Use the same output for run
+and summarize. Preparation needs all three latest checkpoints and complete source
+artifacts, not just the exported analysis. It verifies and snapshots their hashes;
+the source directories are read-only inputs. Earlier studies retain their source
+guards. The new configuration fixes its own source identity and continuation budget.
+
+Run inside tmux; the wrapper saves timestamped logs under `reports/logs/`. Rerunning
+the identical command resumes automatically. Cosine progress is checkpointed per
+epoch together with optimizer state, and interruption recovery repeats any
+uncommitted epoch. Changing the prepared budget or source code is rejected.
+
+```bash
+bash scripts/run_loss_continuation.sh summarize
+```
+
+The resulting `analysis.json` contains the parent histories and latest-checkpoint
+fits, each continuation's history and LR trajectory, and paired per-seed constant
+versus cosine differences. It reports two checkpoint roles separately:
+
+- **Best:** the lowest validation mass score over the entire history, including
+  the parent. `selected_from_parent` identifies an inherited best checkpoint.
+- **Final:** the checkpoint after the full additional budget, regardless of its
+  validation score.
+
+Both roles receive the same three-query train/validation family diagnostics and
+full validation regular/off-grid evaluation. No OOD evaluation is run. Negative
+cosine-minus-constant differences indicate lower error; compare both roles to avoid
+mistaking an inherited best for successful continuation. LR steps occur after each
+optimizer update, so the final stored next LR is the decay endpoint, not the last
+LR actually used. Histories record both.
+
+Tests verify exact constant-continuation equivalence to uninterrupted CPU training,
+exact interrupted/resumed cosine state, interrupted initial checkpoint recovery,
+and initial-fit provenance. A six-branch CPU smoke checks orchestration; it does not
+establish a scientific advantage for either schedule.
 
 ### Protocol freeze and GPU comparison
 
