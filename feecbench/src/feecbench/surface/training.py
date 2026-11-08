@@ -51,6 +51,7 @@ def train(
     progress=False,
     field_balance=None,
     continuation=None,
+    transport="none",
 ):
     device = device_for(device)
     if epochs < 1 or accumulation < 1:
@@ -86,11 +87,13 @@ def train(
         "bands": bands,
         "spectral_weight": spectral_weight,
         "selection_score": "mean configuration normalized-field mass squared error / area, p+u, regular t>0",
-        "features": forward_features(adapter),
+        "features": forward_features(adapter, transport),
     }
     # Preserve the exact legacy scalar settings/hash so old runs still resume.
     if adapter != "scalar":
         settings["adapter"] = adapter
+    if transport != "none":
+        settings["transport"] = transport
     if field_balance is not None:
         settings["field_balance"] = field_balance
     if continuation is not None:
@@ -113,7 +116,7 @@ def train(
     torch.manual_seed(seed)
     if device.type == "cuda":
         torch.cuda.manual_seed_all(seed)
-    model = SurfaceTransolver(width, blocks, slices, adapter=adapter).to(device)
+    model = SurfaceTransolver(width, blocks, slices, adapter=adapter, transport=transport).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     rng = np.random.default_rng(seed)
     start_epoch, best, history = 0, float("inf"), []
@@ -216,7 +219,7 @@ def train(
         order = rng.permutation(len(train_paths))
         for i, index_ in enumerate(order):
             sample = load(train_paths[index_])
-            batch = tensor_sample(sample, scales, device)
+            batch = tensor_sample(sample, scales, device, transport=model.transport)
             choices = np.flatnonzero((sample.times > 0) & ~sample.offgrid)
             query = int(rng.choice(choices))
             prediction = model(batch, batch["times"][query])
@@ -261,7 +264,7 @@ def train(
         with torch.no_grad():
             for path in validation_paths:
                 sample = load(path)
-                batch = tensor_sample(sample, scales, device)
+                batch = tensor_sample(sample, scales, device, transport=model.transport)
                 scores = [
                     float(
                         loss(
@@ -368,7 +371,9 @@ def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1, res
         else:
             atomic_json(identity_path, identity)
     model = SurfaceTransolver(
-        **{k: settings[k] for k in ("width", "blocks", "slices")}, adapter=settings.get("adapter", "scalar")
+        **{k: settings[k] for k in ("width", "blocks", "slices")},
+        adapter=settings.get("adapter", "scalar"),
+        transport=settings.get("transport", "none"),
     ).to(device)
     model.load_state_dict(checkpoint["model"])
     model.eval()
@@ -388,7 +393,7 @@ def evaluate(root, checkpoint_path, output, device="cpu", residual_subset=1, res
                 continue
         row_start, residual_start = len(rows), len(residual_reports)
         sample = load(root / entry["path"])
-        batch = tensor_sample(sample, scales, device)
+        batch = tensor_sample(sample, scales, device, transport=model.transport)
 
         def neural(times, batch=batch):
             with torch.no_grad():

@@ -40,8 +40,10 @@ def source_identity():
     return {str(p.relative_to(package)): file_hash(p) for p in paths}
 
 
-def prepare_campaign(directory, *, epochs=None, smoke=False, protocol_path=None):
+def prepare_campaign(directory, *, epochs=None, smoke=False, protocol_path=None, transport="none"):
     """Create the run specification before looking at any campaign outcomes."""
+    if transport not in ("none", "d0_delta1"):
+        raise ValueError("transport must be none or d0_delta1")
     directory = Path(directory)
     epochs = epochs if epochs is not None else (1 if smoke else 200)
     if epochs < 1:
@@ -102,6 +104,8 @@ def prepare_campaign(directory, *, epochs=None, smoke=False, protocol_path=None)
             "selection": "validation mass score only; no automatic adjustment using test results",
         },
     }
+    if transport != "none":
+        config["training"]["transport"] = transport
     config["hash"] = digest(config)
     path = directory / "campaign.json"
     if path.exists():

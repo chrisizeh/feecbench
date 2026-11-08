@@ -127,6 +127,7 @@ def compare_runs(run_directories, output):
             )
         }
         identity["adapter"] = settings.get("adapter", "scalar")
+        identity["transport"] = settings.get("transport", "none")
         if shared is not None and shared != identity:
             raise ValueError("comparison requires matched data, architecture, field scales and budgets")
         shared = identity

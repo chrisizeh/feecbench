@@ -3,7 +3,7 @@
 Vertex inputs: xyz, p0, c, t. Edge inputs: midpoint xyz, canonical tangent,
 length, u0/length, c, t. The optional vector_features adapter appends the
 edge-direction projection (u0/length)*unit_tangent; it is not a full vector
-reconstruction. No learned incidence/operator transport is claimed.
+reconstruction. Optional d0_delta1 transport precedes each attention block.
 """
 
 from __future__ import annotations
@@ -12,17 +12,24 @@ import numpy as np
 import torch
 from torch import nn
 
+from .transport import TypedTransport
 
-def forward_features(adapter="scalar"):
+
+def forward_features(adapter="scalar", transport="none"):
     """Record the exact learner-visible feature list for checkpoint provenance."""
     if adapter not in ("scalar", "vector_features"):
         raise ValueError("adapter must be scalar or vector_features")
+    if transport not in ("none", "d0_delta1"):
+        raise ValueError("transport must be none or d0_delta1")
     result = {
         "vertex": ["xyz", "p0/scalep", "c", "t"],
         "edge": ["midpoint", "canonical_tangent", "length", "canonical_u0/(length*scaleu)", "c", "t"],
     }
     if adapter == "vector_features":
         result["edge"].append("(canonical_u0/(length*scaleu))*canonical_unit_tangent [3 components]")
+    if transport != "none":
+        result["operators"] = ["D0", "consistent M0", "consistent M1"]
+        result["transport"] = "v1: canonical edge densities; D0 and full-M0-solve delta1 before each attention block"
     return result
 
 
@@ -48,11 +55,11 @@ class SliceAttention(nn.Module):
 
 
 class SurfaceTransolver(nn.Module):
-    def __init__(self, width=128, blocks=4, slices=32, adapter="scalar"):
+    def __init__(self, width=128, blocks=4, slices=32, adapter="scalar", transport="none"):
         super().__init__()
-        if adapter not in ("scalar", "vector_features"):
-            raise ValueError("adapter must be scalar or vector_features")
+        forward_features(adapter, transport)
         self.adapter = adapter
+        self.transport = transport
         self.settings = {"width": width, "blocks": blocks, "slices": slices, "adapter": adapter}
         self.vertex_encoder = nn.Linear(6, width)
         self.edge_encoder = nn.Linear(10, width)
@@ -67,6 +74,9 @@ class SurfaceTransolver(nn.Module):
                 weight = self.edge_encoder.weight
                 self.edge_encoder.weight = nn.Parameter(torch.cat((weight, weight.new_zeros(width, 3)), dim=1))
                 self.edge_encoder.in_features = 13
+        if transport != "none":
+            self.settings["transport"] = transport
+            self.transports = nn.ModuleList([TypedTransport(width) for _ in range(blocks)])
 
     def forward(self, batch, query_time):
         """One mesh per call. Canonicalize input and map velocity back to requested signs."""
@@ -94,7 +104,9 @@ class SurfaceTransolver(nn.Module):
         if self.adapter == "vector_features":
             e = torch.cat((e, uv * (tangent / length[:, None])), dim=1)
         tokens = torch.cat((self.vertex_encoder(v), self.edge_encoder(e)))
-        for block in self.blocks:
+        for i, block in enumerate(self.blocks):
+            if self.transport != "none":
+                tokens = self.transports[i](tokens, batch)
             tokens = block(tokens)
         p = batch["p0"] + t.squeeze() * self.pressure_head(tokens[: len(xyz)]).squeeze(-1)
         u = batch["u0"] + t.squeeze() * self.velocity_head(tokens[len(xyz) :]).squeeze(-1) * length * sign
@@ -109,13 +121,14 @@ def sparse_tensor(matrix, device="cpu", dtype=torch.float32):
     ).coalesce()
 
 
-def tensor_sample(sample, scales, device="cpu"):
+def tensor_sample(sample, scales, device="cpu", transport="none"):
+    forward_features(transport=transport)
     op = sample.ops
 
     def tensor(x):
         return torch.as_tensor(x, dtype=torch.float32, device=device)
 
-    return {
+    batch = {
         "points": tensor(op.points),
         "edges": torch.as_tensor(op.edges, dtype=torch.long, device=device),
         "p0": tensor(sample.pressure[0] / scales["pressure"]),
@@ -130,6 +143,10 @@ def tensor_sample(sample, scales, device="cpu"):
         "times": tensor(sample.times),
         "coefficient": 1.0,
     }
+    if transport != "none":
+        batch["d0"] = sparse_tensor(op.d0, device)
+        batch["m0_diagonal"] = tensor(op.m0.diagonal())
+    return batch
 
 
 def quadratic(error, mass):

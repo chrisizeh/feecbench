@@ -89,10 +89,11 @@ def test_end_to_end_orientation(samples, adapter):
 
 
 @pytest.mark.parametrize("which", [0, 1])
-def test_overfit_both_coupling_directions(samples, which):
+@pytest.mark.parametrize("transport", ["none", "d0_delta1"])
+def test_overfit_both_coupling_directions(samples, which, transport):
     torch.manual_seed(12)
-    batch = tensor_sample(samples[which], {"pressure": 1, "velocity": 1})
-    model = SurfaceTransolver(32, 1, 8)
+    batch = tensor_sample(samples[which], {"pressure": 1, "velocity": 1}, transport=transport)
+    model = SurfaceTransolver(32, 1, 8, transport=transport)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
     target = (batch["pressure"][2], batch["velocity"][2])
     initial = float(loss(model(batch, 0.4), target, batch).detach())

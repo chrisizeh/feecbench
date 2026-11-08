@@ -21,11 +21,17 @@ def main():
     parser.add_argument("--epochs", type=int, help="prepare only; default 200, or 1 for smoke")
     parser.add_argument("--smoke", action="store_true", help="prepare only; tiny CPU-compatible plumbing check")
     parser.add_argument("--protocol", type=Path, help="prepare only; genuine frozen protocol enables spectral runs")
+    parser.add_argument("--transport", choices=("none", "d0_delta1"), help="prepare only")
     args = parser.parse_args()
-    if args.command != "prepare" and (args.epochs is not None or args.smoke or args.protocol):
+    if args.command != "prepare" and (
+        args.epochs is not None or args.smoke or args.protocol or args.transport is not None
+    ):
         parser.error("settings are fixed at prepare; use a separate directory for a different campaign")
     if args.command == "prepare":
-        config = prepare_campaign(args.output, epochs=args.epochs, smoke=args.smoke, protocol_path=args.protocol)
+        config = prepare_campaign(
+            args.output, epochs=args.epochs, smoke=args.smoke, protocol_path=args.protocol,
+            transport=args.transport or "none",
+        )
         print(f"Prepared {config['status']}: {args.output}")
         print(f"Per run: {config['training']['epochs']} epochs, {config['updates_per_run']} optimizer updates")
         print(f"Baseline: mass seed 0. Suite: {len(config['seeds']) * len(config['objectives'])} runs total.")

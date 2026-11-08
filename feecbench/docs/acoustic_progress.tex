@@ -1,0 +1,332 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[margin=18mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,microtype,amsmath,amssymb,booktabs,tabularx,enumitem}
+\usepackage{graphicx,xcolor,caption,fancyhdr}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xurl}
+\definecolor{ink}{HTML}{183344}
+\definecolor{teal}{HTML}{237A69}
+\definecolor{rust}{HTML}{A34F37}
+\definecolor{muted}{HTML}{52616B}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlist{nosep,leftmargin=*}
+\captionsetup{font=small,labelfont=bf,skip=5pt,hypcap=false}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small\color{muted}FEEC acoustic benchmark / exploratory findings}
+\fancyhead[R]{\small\color{muted}8 November 2026}
+\fancyfoot[R]{\small\thepage}\renewcommand{\headrulewidth}{0pt}
+\setlength{\headheight}{14pt}
+\newcommand{\pct}{\%}
+\newcommand{\takeaway}[1]{\vspace{3pt}{\large\bfseries\color{ink}#1}\par\vspace{3pt}}
+\graphicspath{{feecbench/reports/acoustic-progress/figures/}}
+\begin{document}
+{\LARGE\bfseries\color{ink}What improves, what breaks down,\\and what remains untested}\par
+{\large FEEC acoustic benchmark}\par
+\takeaway{Balancing the loss improves velocity prediction.\\Learning the coupled dynamics remains difficult.}
+All full-run results below use attention without differential transport. The new
+transport extension has implementation checks, but no full-run predictive result.
+
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{29mm}X>{\raggedright\arraybackslash}p{34mm}@{}}
+\toprule
+Question & Evidence & Assessment\\\midrule
+Reference solver & Independent backend agreement and convergence; sampled resolution audit & \textcolor{teal}{Supported, with limits}\\
+Field weighting & Validation velocity error falls from 92.1\pct\ to 40.4\pct\ with balanced MSE & \textcolor{teal}{Clear improvement}\\
+Coupled dynamics & Exact-velocity-family pressure error: 60.9\pct\ train, 67.9\pct\ validation (fixed queries) & \textcolor{rust}{Still limited}\\
+Transfer & Higher errors on held-out geometry, genus and meshes; mass loss only & \textcolor{rust}{Degrades; still useful}\\
+Typed transport & CPU implementation checks; full experiments pending & \textcolor{muted}{Benefit untested}\\
+\bottomrule
+\end{tabularx}
+
+\section*{1. What succeeds: correcting field imbalance}
+\includegraphics[width=\linewidth]{loss_comparison.pdf}
+\captionof{figure}{Regular-query validation, 64 configurations. Dots are seeds 0--2;
+horizontal marks and labels are means. All objectives use the same corpus and
+25,600 updates. Lower is better; these are errors, not pass rates.}
+
+\textbf{Interpretation.} Ordinary MSE has approximately 173:1 pressure-to-velocity
+zero-prediction loss contributions after physical normalization. Balancing these
+contributions recovers much of mass weighting's aggregate velocity improvement:
+92.11\pct\ (MSE), 39.69\pct\ (mass), 40.36\pct\ (balanced).
+This supports field balancing as a required control; it does not establish that
+mass geometry is irrelevant or that either objective solves the dynamics.
+
+\textbf{Reading the evidence.} Errors use mass norms in raw physical units,
+normalized over each target trajectory, then averaged equally over configurations
+and seeds. Fixed-query fitting diagnostics on the next page use a separate query
+set. Full-run results are exploratory; numerical scope and methods are in the appendix.
+
+\clearpage
+\section*{2. Where it breaks down: family and response field}
+\takeaway{Exact-velocity inputs expose a pressure-fitting limitation.}
+The family averages separate pressure-driven responses from velocity-driven pressure.
+A high training error shows that fitting itself remains difficult; the additional
+validation gap measures a different limitation.
+
+\includegraphics[width=\linewidth]{family_response.pdf}
+\captionof{figure}{Fixed-query diagnostic at $t=0.26,0.50,0.76$. Each cell is the
+three-seed mean error in percent; 128 training and 16 validation configurations per
+family. All panels share a 0--110\pct\ scale. Colors encode error magnitude only,
+with no universal success threshold. These are whole-field errors within each family,
+not isolated causal-response errors.}
+
+\textbf{Read the pressure row for exact velocity.} With balanced MSE, training
+pressure error is 60.91\pct\ and validation error is 67.85\pct: a 6.94 percentage-point
+gap on top of a large fitting error. The full-run limitation is already present on
+seen configurations. It cannot be explained by distribution shift alone.
+
+\textbf{Read velocity across the pulse families.} Balancing markedly improves
+velocity compared with ordinary MSE, but pulse-family error remains
+36.71\pct\ on training and 37.81\pct\ on validation. Better aggregate accuracy is
+not the same as accurate pressure-to-velocity response.
+
+\textbf{Keep stationary and dynamic content separate.} Pulse-plus-harmonic velocity
+includes a stationary component. Its lower whole-field error does not by itself
+prove better dynamic coupling. In regular-query balanced validation, harmonic
+component error in this family averages 12.83\pct. Report exact, harmonic and
+spurious coexact content separately; zero-target components require absolute leakage.
+
+\takeaway{This is a limitation of the reported training runs, not proof of architectural impossibility.}
+Two-case local fits passed both coupling directions after a longer budget; a
+2,000-update cosine run reached 6.30/4.41\pct\ source-response errors. These are
+single-seed, grid-12 diagnostics, not directly comparable full-corpus results.
+
+\clearpage
+\section*{3. How failure evolves over time}
+\takeaway{Field error and conserved quantities answer different questions.}
+These two validation examples use balanced MSE. Selection is deterministic: rank
+configurations within each family by three-seed mean pressure trajectory error,
+choose the nearest-rank median pulse and 90th-percentile exact-velocity case,
+and display seed 0. They illustrate behavior rather than establish population rates.
+
+\includegraphics[width=\linewidth]{case_dynamics.pdf}
+\captionof{figure}{Positive regular queries in the training horizon $0<t\leq1$.
+Top: saved mass-normalized pressure and velocity error curves, with a common vertical
+scale. Bottom: predicted and reference total energy relative to reference energy
+at the first plotted time. Case IDs and selection ranks are saved in
+\texttt{figures/provenance.json}. The typical pulse is a relative success, not a
+threshold-qualified pass.}
+
+\textbf{Population context.} Across all balanced validation cases and seeds,
+the mean of each configuration's maximum relative energy error is 27.63\pct;
+for the exact-velocity family it rises to 66.55\pct. This is a mean of per-case
+maxima, not the maximum of a mean energy curve. Lower field error has not
+established faithful physics.
+
+\textbf{Read across the cases.} The typical pulse keeps pressure error relatively
+low, while velocity error grows. The difficult exact-velocity case has large
+pressure error and loses most of its total energy by the end of the horizon.
+Energy preservation alone would still be insufficient: frozen
+initial fields can preserve total energy while missing the exchange between fields.
+
+\textbf{What remains to visualize.} The available full-run export contains
+predictions and scored curves, but not the matching reference meshes/fields or
+separate pressure/velocity energy curves. Spatial reference--prediction--error
+panels and energy-exchange plots therefore remain pending those inputs. They should
+use these same selected cases, three matched times, shared reference/prediction
+color scales and an independent error scale. No surrogate spatial data are used here.
+
+\clearpage
+\section*{4. How far the improvement extends}
+\takeaway{Mass-loss predictions transfer with degradation. Balanced-MSE OOD is untested.}
+\includegraphics[width=\linewidth]{transfer.pdf}
+\captionof{figure}{Original mass-loss campaign, regular queries, three-seed means,
+64 configurations per setting. Labels show absolute error and change from ID medium
+in percentage points (pp). Mesh variants are paired to the ID configurations;
+geometry/genus shifts compare separate partitions. Dashed lines mark ID medium.}
+
+\textbf{Accuracy context.} Mass-loss ID-medium error is 28.23/38.34\pct\ for
+pressure/velocity. The truncated modal control reaches 1.33/1.72\pct\ against the
+same-mesh oracle. It uses the known linear operator, is not a learned baseline,
+and its score is not continuum accuracy. Neural improvement over persistence and
+zero controls does not close this numerical-control gap.
+
+\textbf{Scope.} Genus-3 transfer also changes geometry. These results establish
+neither isolated topological generalization nor balanced-MSE OOD performance.
+Off-grid validation stays within the same horizon: aggregate pressure/velocity
+errors are 30.29/90.37\pct\ (MSE), 28.00/38.82\pct\ (mass), and
+27.02/39.46\pct\ (balanced). There is no long-time claim.
+
+\section*{5. The next experiment must distinguish the explanations}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{31mm}XX@{}}
+\toprule
+Hypothesis & Matched experiment & Evidence needed\\\midrule
+Optimization limits fitting & Constant/cosine continuation with matched update budgets & Both coupling responses improve on training and validation\\
+Differential transport helps & Attention versus $D_0/\delta_1$ messages; same loss, seeds and queries & Paired family/field gains, physics diagnostics and capacity/compute controls\\
+Improvements generalize & Frozen protocol and fresh held-out evaluation & Balanced and transport results across geometry, genus and meshes\\
+\bottomrule
+\end{tabularx}
+
+\textbf{Numerical prerequisite.} Complete mixed-pressure exact-velocity and remeshing
+reference checks before confirmatory claims. The grid-16 audit's largest sampled
+velocity difference is 4.99\pct, close to the provisional 5\pct\ margin; backend
+agreement does not remove this resolution uncertainty.
+\clearpage\section*{Appendix A. Experimental setup and numerical evidence}
+
+\textbf{Task.} Predict pressure $p(t)\in C^0$ and velocity $u(t)\in C^1$ from an
+initial state, surface mesh and query time. Connected, closed orientable surfaces
+have genus 1--3, constant sound speed $c=1$, no forcing, damping or boundaries,
+and horizon $T=1$. The Whitney FEEC reference solves
+\[
+ M_0\dot p=D_0^\top M_1u,\qquad \dot u=-D_0p,
+ \qquad E=\tfrac12(p^\top M_0p+u^\top M_1u).
+\]
+PyDEC supplies consistent masses; implicit midpoint advances the solution.
+The four initial-condition families are one pulse, two pulses, pulse plus harmonic
+velocity, and exact velocity $u_0=D_0\psi$ with zero or independently varied pressure.
+Harmonic velocity alone is stationary; exact velocity is essential for testing
+velocity-driven pressure dynamics.
+
+\textbf{Data and controls.} Train on 512 genus-1/2 configurations; use 64 each for
+validation, ID test, geometry OOD and genus-3 OOD. Coarse, fine and independent
+remeshes of the ID set give 960 mesh samples from 768 configurations. Train on
+medium meshes, grid 16; use $\Delta t=0.002$, 51 regular snapshots and 64 pressure
+modes. Positive regular times train the model; off-grid queries are evaluated
+separately within the same horizon. Splits group physical configurations and
+geometries; scales use training-medium data only. Zero prediction, persistence
+and a truncated modal propagator are controls.
+
+\textbf{Model and budget.} The scalar Transolver-style adapter has separate vertex
+and edge encoders/heads, shared slice attention, canonical edge signs and
+length-aware cochains: four blocks, width 128, 32 slices, 681,602 parameters.
+The forward pass uses geometry, initial fields, time and $c$; FEEC operators
+originally entered the oracle, losses and diagnostics only. Six mass/MSE runs
+and three fresh balanced-MSE runs use paired seeds 0--2, AdamW, constant
+learning rate $10^{-3}$, accumulation four, and 200 epochs/25,600 updates each.
+Checkpoints share validation mass-score selection. The balanced study reuses the
+same corpus and evaluates only training/validation; its recorded GPU is an H100
+NVL MIG 3g.47gb. This was intentionally a baseline/loss study, not the complete
+Transformer--TNO architecture experiment.
+
+
+Independent MFEM assembly/stepping passed 36 cases: maximum relative matrix and
+trajectory discrepancies were $6.14\times10^{-14}$ and $1.26\times10^{-13}$.
+Temporal orders were approximately two; an analytical sphere test gave spatial/
+geometric orders 1.82--1.89. These validate different aspects of the oracle;
+backend agreement and energy conservation alone do not bound discretization error.
+
+The older grid-12 development study failed its provisional middle-band gate
+(6.51\pct) and reached 9.87\pct\ velocity discrepancy. The newer disjoint,
+24-configuration grid-16 audit has maximum spatial-plus-geometry differences
+of 0.94\pct\ low-band pressure, 4.18\pct\ middle-band pressure and 4.99\pct\ velocity.
+The largest temporal velocity difference is 0.52\pct. These sampled fine-grid
+differences support exploratory comparisons but are not continuum bounds or a
+frozen protocol; the audit exact-velocity cases have zero initial pressure.
+
+Local two-case grid-12 diagnostics also caution against declaring an architecture
+failure: 500-update fits failed the 10\pct\ coupling criterion, whereas a balanced
+scalar fit at 1,500 updates passed both directions; 2,000 updates with cosine
+decay reached 6.30/4.41\pct\ source-response errors. These are single-seed fitting
+results. Changing both schedule and budget does not isolate either effect.
+Directional-feature additions did not establish a general fix. Matched full-run
+constant/cosine continuation is prepared, but no full-run result is included here.
+
+\clearpage\section*{Appendix B. Typed transport implementation}
+
+The optional \texttt{--transport d0\_delta1} adds simultaneous residual differential
+messages before every attention block. With canonical edge-density hidden features
+$Z_1$, requested-orientation signs $S$ and edge lengths $L$, the messages are
+\[
+ m_{0\to1}=L^{-1}S D_0Z_0,\qquad
+ m_{1\to0}=M_0^{-1}D_0^\top M_1SLZ_1.
+\]
+The $SL$ factors convert densities to oriented integral cochains and back.
+Hidden channels are learned features rather than physical $p/u$; physical field
+scale ratios are not inserted into these latent maps. Each message receives
+channel LayerNorm and a learned projection before the residual update.
+
+The full consistent $M_0$ system uses device-local, multi-column preconditioned
+CG and an implicit adjoint solve in backward, with no dense inverse. Jacobi is
+only the preconditioner. Float32/float64 relative tolerances are $10^{-6}/10^{-10}$,
+with at most 64 iterations and a true-residual check allowing five times that
+tolerance; failed solves raise. Mesh/operator differentiation and mixed precision
+are unsupported. Output projections start at zero, preserving shared baseline
+initialization and initial predictions. The standard variant has 814,722 parameters
+(+133,120, approximately 19.5\pct); equal updates do not equalize capacity or compute.
+
+Transport is recorded in training/checkpoint identities and restored for evaluation
+and diagnostics. Resume rejects architecture changes; the default
+\texttt{--transport none} preserves the baseline. Historical campaign source guards
+remain active, so new source/architecture runs require fresh output directories.
+Loss-only comparison tools reject mixed transports. CPU checks cover operator
+agreement, adjoint gradients, active orientation flips, initial-state recovery,
+both coupling-direction overfits, and training/resume/evaluation integration.
+The full CPU suite passes 111 tests, with three CUDA/backend checks skipped;
+Ruff and the three-epoch command-line CPU smoke workflow also pass.
+These are implementation checks, not predictive-performance results.
+\textbf{No full GPU transport or OOD result is claimed.}
+
+\section*{Interpretation and remaining limitations}
+
+\begin{enumerate}
+\item Keep balanced MSE as a required control; separate field balancing, geometric
+loss weighting and architectural transport. Next compare attention with transport
+using the same corpus, objective, paired seeds, query sampling, selection score and
+budget. Add capacity/compute controls before attributing gains solely to transport.
+\item Report pressure/velocity by family, genus and mesh, plus exact/harmonic/coexact
+errors, energy, residuals and time curves. Zero-target harmonic content needs absolute
+leakage scores, not floor-dominated relative errors. Residual evaluation currently
+covers one sample per run, so it cannot establish corpus-wide PDE fidelity.
+\item Complete reference checks for mixed-pressure exact-velocity cases and remeshing;
+review propagation horizon, spectral eligibility and numerical margins before
+protocol freeze or spectral-loss claims. The 5\pct\ velocity margin is very narrow.
+\item Genus transfer is confounded with geometry. All four IC families occur in
+training; no unseen-family, coefficient, long-time, autoregressive or cross-PDE
+transfer is tested. Harmonic ICs span only a $g$-dimensional subspace of the full
+$2g$ space; reference velocity has no coexact component. General commuting transfers
+between curved/remeshed spaces are not established.
+\item This is an acoustic $C^0/C^1$ transport extension, not the full Transformer--TNO
+foundation model. Canonicalization handles edge flips, but the nonlinear architecture
+does not guarantee conservation or intrinsic equivariance. CUDA transport agreement,
+runtime, memory and predictive benefit remain unmeasured. Existing held-out scores
+informed these design decisions; a confirmatory claim needs a frozen protocol and
+fresh evaluation evidence. The modal control remains essential for accuracy/cost context.
+\end{enumerate}
+
+\clearpage\section*{Appendix C. Evidence and reproduction}
+
+\small
+Repository-relative sources: \path{plan.md}; \path{feecbench/SURFACE_EXPERIMENT.md};
+\path{feecbench/DECISIONS.md}; full campaign export
+\path{reports/acoustic/analysis.json}; latest study
+\path{reports/acoustic/loss-balance-g16/analysis.json} and its per-seed
+\path{runs/*/evaluation/per_sample.json}; independent validation
+\path{feecbench/reports/surface_validation_mfem.json}.
+Original proposals: \textit{PDE Benchmark}, Sections 1.3, 4--6, and
+\textit{Typed Physics Benchmark and Transformer--TNO}, Sections 8--15.
+Full-run results date from 5--7 November; transport implementation is dated
+8 November. Generated corpora and reports remain outside version control.
+
+From \path{feecbench/}, a small end-to-end check is
+\texttt{bash scripts/run\_acoustic\_baseline.sh smoke --device cpu}
+\texttt{--transport d0\_delta1 --objective mse\_balanced}.
+Training/diagnostic commands for the existing full corpus are documented in
+\path{SURFACE_EXPERIMENT.md}. To regenerate the figures and compile this source from the repository root:
+\begin{verbatim}
+python3 feecbench/scripts/plot_acoustic_progress.py
+pdflatex -output-directory=feecbench/reports/acoustic-progress \
+  feecbench/docs/acoustic_progress.tex
+\end{verbatim}
+Run LaTeX twice to resolve table references.
+
+\normalsize
+\textbf{Figure provenance.} The plotting script reads the original campaign summary,
+the matched loss study and all three balanced per-sample evaluation files. It checks
+campaign identity, objective/seed coverage and aggregation counts. It writes source
+SHA-256 hashes, unrounded plotted seed means and deterministic case-selection details
+to \path{feecbench/reports/acoustic-progress/figures/provenance.json}.
+Figures and compiled outputs are generated under the ignored reports directory.
+The report does not rerun training or reference simulations.
+
+\textbf{Comparison detail.} Regular-query validation mean $\pm$ seed standard deviation
+(not a confidence interval): MSE pressure $31.11\pm2.76$\pct, velocity
+$92.11\pm1.85$\pct; mass pressure $28.61\pm2.53$\pct, velocity $39.69\pm2.87$\pct;
+balanced pressure $27.60\pm1.52$\pct, velocity $40.36\pm4.40$\pct.
+Training-derived balancing weights are 0.502886 for pressure and 87.1354 for velocity;
+neither floor activates. The common multiplier matches expected zero-prediction
+loss, not gradients, clipping or optimizer trajectories. Balanced MSE improves
+fixed-query validation velocity over ordinary MSE in every family/seed, but does
+not uniformly beat mass loss.
+\end{document}

@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--adapter", choices=("source", "scalar", "vector_features"), default="source")
     parser.add_argument("--lr-schedule", choices=("constant", "cosine"), default="constant")
     parser.add_argument("--final-lr-ratio", type=float, default=0.01)
+    parser.add_argument("--transport", choices=("source", "none", "d0_delta1"), default="source")
     args = parser.parse_args()
     if args.output.exists() and any(args.output.iterdir()):
         parser.error("output directory must be empty; use a new directory")
@@ -44,6 +45,7 @@ def main():
             objective=args.objective,
             energy_floor=args.energy_floor,
             adapter=None if args.adapter == "source" else args.adapter,
+            transport=None if args.transport == "source" else args.transport,
             lr_schedule=args.lr_schedule,
             final_lr_ratio=args.final_lr_ratio,
         )

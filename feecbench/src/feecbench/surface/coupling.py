@@ -121,6 +121,7 @@ def _context(root, run, device, checkpoint_path=None):
         raise ValueError("checkpoint/corpus fingerprint mismatch")
     architecture = {k: settings[k] for k in ("width", "blocks", "slices")}
     architecture["adapter"] = settings.get("adapter", "scalar")
+    architecture["transport"] = settings.get("transport", "none")
     model = SurfaceTransolver(**architecture).to(device)
     model.load_state_dict(checkpoint["model"])
     return index, checkpoint, model
@@ -137,7 +138,7 @@ def inspect_checkpoint(root, run, output, device="cpu", queries=3, checkpoint_pa
         if entry["split"] not in ("train", "validation") or entry["resolution"] != "medium":
             continue
         sample = load(root / entry["path"])
-        batch = tensor_sample(sample, scales, device)
+        batch = tensor_sample(sample, scales, device, transport=model.transport)
         rows.append(inspect_sample(model, sample, batch, query_indices(sample, queries), scales))
     summary = []
     for split in ("train", "validation"):
@@ -253,6 +254,7 @@ def overfit_coupling(
     adapter=None,
     lr_schedule="constant",
     final_lr_ratio=0.01,
+    transport=None,
 ):
     """Fresh model, fixed architecture/scales, joint pure-source and zero controls.
 
@@ -280,6 +282,7 @@ def overfit_coupling(
     scales = settings["scales"]
     architecture = {k: settings[k] for k in ("width", "blocks", "slices")}
     architecture["adapter"] = adapter if adapter is not None else settings.get("adapter", "scalar")
+    architecture["transport"] = transport if transport is not None else settings.get("transport", "none")
     torch.manual_seed(seed)
     if device.type == "cuda":
         torch.cuda.manual_seed_all(seed)
@@ -291,7 +294,7 @@ def overfit_coupling(
         else None
     )
     samples = select_overfit_samples(root, index["samples"])
-    batches = [tensor_sample(sample, scales, device) for sample in samples]
+    batches = [tensor_sample(sample, scales, device, transport=model.transport) for sample in samples]
     indices = [query_indices(sample, queries) for sample in samples]
     energy_pairs = [fixed_field_energies(batch, qs, energy_floor) for batch, qs in zip(batches, indices, strict=True)]
     denominators = [pair[1] for pair in energy_pairs]
@@ -364,7 +367,8 @@ def overfit_coupling(
                         **settings,
                         "objective": objective,
                         "adapter": architecture["adapter"],
-                        "features": forward_features(architecture["adapter"]),
+                        "transport": architecture["transport"],
+                        "features": forward_features(architecture["adapter"], architecture["transport"]),
                     },
                     "step": step,
                     "diagnostic_only": True,
@@ -426,9 +430,10 @@ def overfit_coupling(
         "steps": steps,
         "architecture": architecture,
         "source_adapter": settings.get("adapter", "scalar"),
-        "features": forward_features(architecture["adapter"]),
+        "source_transport": settings.get("transport", "none"),
+        "features": forward_features(architecture["adapter"], architecture["transport"]),
         "parameter_count": sum(p.numel() for p in model.parameters()),
-        "paired_initialization": "legacy shared weights; extra vector feature columns start at zero",
+        "paired_initialization": "legacy shared weights; vector columns and transport output projections start at zero",
         "learning_rate": settings["lr"],
         "lr_schedule": lr_schedule,
         "final_lr_ratio": final_lr_ratio if scheduler is not None else 1.0,

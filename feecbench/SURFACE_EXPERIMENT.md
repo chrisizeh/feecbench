@@ -5,6 +5,181 @@ The `feecbench.surface` package implements the first experiment in the repositor
 scientific pilot is gated: implementing and testing the pipeline does not establish
 that all proposed mesh/frequency ranges are adequately resolved.
 
+## Extended transport experiment
+
+The new runner reuses the complete existing corpus and runs a fixed factorial study:
+
+| Axis | Values |
+| --- | --- |
+| Architecture | Existing attention baseline; attention plus D0/delta1 transport |
+| Objective | Balanced MSE; consistent mass loss |
+| Seed | 0, 1, 2, paired across architecture and objective |
+| Budget | Snapshots at 200 and 400 epochs, each with best and final checkpoints |
+| Optimizer | AdamW, constant LR 0.001, accumulation four, unchanged sampler |
+| Model | Scalar adapter, width 128, four blocks, 32 slices |
+
+There are **12 fresh runs**, not 24: each 400-epoch run continues its own 200-epoch
+state. With 512 training configurations, each epoch has 128 optimizer updates;
+the full suite totals **614,400 updates**. Existing historical runs are read-only
+context, not automatically resumed or substituted for these matched fresh runs.
+The primary comparison is transport versus attention at fixed loss/budget/seed;
+secondary comparisons examine extra budget and mass versus balanced MSE. Ordinary
+MSE's known imbalance is not rerun. Constant LR keeps scheduling out of this comparison.
+The new transport has 814,722 parameters versus 681,602; this is not a capacity-
+or wall-time-matched ablation. No GPU runtime estimate is assumed.
+
+**Launch on the GPU machine containing the full HDF5 corpus.** From the repository
+root (the wrapper changes into the package directory):
+
+```bash
+bash feecbench/scripts/run_transport_study.sh prepare
+bash feecbench/scripts/run_transport_study.sh run --device cuda --stage suite
+```
+
+Run the second command in tmux. Defaults use the package-relative source
+`reports/acoustic/generalization-g16/data` and destination
+`reports/acoustic/transport-study-g16`. An exported `analysis.json` alone is not a
+corpus. Preparation checks/hash-binds the manifest, all sample files, training-only
+scales and balanced-MSE weights; it starts no generation/training. Files in the
+source corpus are not changed. For a different location or budget, prepare a new
+output directory and supply that same output to every subsequent command:
+
+```bash
+bash feecbench/scripts/run_transport_study.sh prepare \
+  --root /absolute/path/to/generalization-g16/data \
+  --output reports/acoustic/transport-custom --first-budget 200 --epochs 400
+```
+
+For a smaller first launch, replace `--stage suite` with `--stage pilot`. It runs
+balanced MSE, seed 0, both architectures, through the first budget only. The suite
+then reuses those stages and finishes the remaining budgets/runs. A preflight
+exercises active transport and backward on one training mesh; CUDA runs also compare
+CPU/GPU outputs and parameter gradients. A failure stops before a long training job.
+It is not exhaustive validation of every mesh or a runtime forecast.
+
+**Resume and review.** Rerun the identical `run` command after interruption; no
+`--resume` flag is needed. Training resumes committed epochs, evaluation repairs
+missing/corrupt prediction caches, and completed training milestones are skipped.
+An OS lock prevents concurrent writers. Data/code/lockfile/setting changes are
+rejected; retain the prepared checkout or prepare another study. The snapshots
+under `runs/<transport>-<loss>-seedN/epoch-200` and `epoch-400` are independent of
+the mutable latest training checkpoint. Damaged earlier snapshots after training
+has advanced require restoring those original artifacts, not silently retraining.
+
+```bash
+bash feecbench/scripts/run_transport_study.sh summarize
+bash feecbench/scripts/run_transport_study.sh export
+```
+
+The default suite evaluates **training/validation only**, including fixed-query
+source-removal coupling checks and full regular/off-grid validation. `analysis.json`
+contains paired per-seed transport, loss and budget differences; mean/median/p90
+field errors; spectral energies; exact/harmonic/coexact errors; energy and closedness;
+checkpoint roles and resources. Errors are compared at fixed configuration/query/mesh
+groups; seed standard deviation is not a confidence interval. Harmonic/coexact
+summary errors are absolute, avoiding division by zero target components. Raw
+checkpoint records use one-based `checkpoint_epoch`: a 400-epoch best selected at
+epoch 200 or earlier is inherited from the first budget, so compare its final-role
+result before concluding that the additional training helped. Raw
+predictions, per-configuration time curves and residual reports remain in each
+evaluation directory. Residuals cover the first four eligible mesh samples (one in
+smoke), not the full corpus or a stratified sample. Timing reports distinguish
+epoch time including validation, last training invocation time, whole-trajectory
+inference time excluding preprocessing, and last-invocation CUDA peak allocation.
+
+`report.zip` packages the specification, summaries, histories, fit diagnostics,
+residuals and resource records for review; it omits HDF5 data, checkpoints and raw
+predictions. Timestamped launcher logs live under `reports/logs/`.
+
+**Held-out evaluation is a separate explicit stage**, available only after every
+validation run and both budgets/roles are complete:
+
+```bash
+bash feecbench/scripts/run_transport_study.sh run --device cuda --stage heldout
+bash feecbench/scripts/run_transport_study.sh export
+```
+
+It scores all prepared variants/budgets/roles on available ID, geometry OOD and
+genus-3 partitions, including coarse/fine/remeshed ID variants already in the source
+corpus. It neither regenerates data nor selects new settings. These previously
+inspected test sets remain exploratory; they are not fresh confirmatory evidence.
+Reference-resolution gates, unseen-family/coefficient/long-time tests, spectral
+training, capacity-matched controls and full Transformer–TNO remain separate work.
+
+For a local orchestration smoke with an existing small corpus, use a new output:
+
+```bash
+bash feecbench/scripts/run_transport_study.sh prepare --smoke \
+  --root reports/acoustic/campaign-smoke-v2/data \
+  --output reports/acoustic/transport-study-smoke
+bash feecbench/scripts/run_transport_study.sh run --device cpu \
+  --output reports/acoustic/transport-study-smoke
+```
+
+Smoke keeps all 12 combinations but uses width 16, one block, four slices and
+budgets 1/2 epochs. It tests orchestration, not scientific performance. Create a
+small campaign corpus first if that example source path is not present.
+Executed locally: all 12 smoke runs, 48 validation and 48 held-out checkpoint-role
+records, both query types and all four mesh variants completed. The full acceptance
+suite passed 111 tests with three hardware/backend skips; Ruff passed. Recovery,
+immutable milestones, source checks and paired-summary calculations have regression
+coverage. The full-size GPU experiment remains to be run on the user's GPU host.
+
+## Typed transport and current results (2026-11-08)
+
+The exported full campaign and subsequent balanced-MSE study supersede the historical
+"no GPU comparison" status below. Three-seed regular-query validation mass-normalized
+pressure/velocity errors are 31.11%/92.11% (MSE), 28.61%/39.69% (mass), and
+27.60%/40.36% (balanced MSE). Balancing recovers most of the aggregate velocity benefit;
+it does not establish superiority of FEEC loss or typed transport. All those models
+used the scalar attention adapter **without differential transport**. Balanced MSE
+has only training/validation evaluation. The original grid-16 campaign's 24-case
+audit has maximum low/middle/velocity spatial-plus-geometry differences of
+0.94%/4.18%/4.99%; these sampled differences do not freeze a scientific protocol.
+See `docs/acoustic_progress.tex` for the concise report, source locations and limitations.
+
+`--transport d0_delta1` now adds explicit vertex-to-edge D0 and edge-to-vertex
+`M0^-1 D0.T M1` messages before each attention block. The consistent sparse M0
+solve is differentiable; canonical edge densities are converted to/from integral
+cochains around the operators. See decision 24 for the precise convention and solver
+tolerances. The existing baseline remains `--transport none`. Shared parameters
+have identical initialization; the new residual projections start at zero. Transport
+adds 133,120 parameters at the standard size. Conservation and full orientation-
+equivariant latent learning are not enforced by this canonicalization-based adapter.
+
+Run the small end-to-end check from the package directory:
+
+```bash
+bash scripts/run_acoustic_baseline.sh smoke --device cpu --transport d0_delta1 --objective mse_balanced
+```
+
+For the next full experiment, reuse the original corpus and create fresh runs for
+seeds 0, 1 and 2 with the same objective and update budget as the baseline:
+
+```bash
+bash scripts/run_acoustic_baseline.sh train --device cuda --transport d0_delta1 \
+  --objective mse_balanced --seed 0 --epochs 200 \
+  --root reports/acoustic/generalization-g16/data \
+  --output reports/acoustic/transport-g16/mse_balanced-seed0
+uv run --locked --extra surface python scripts/diagnose_coupling.py inspect \
+  --device cuda --root reports/acoustic/generalization-g16/data \
+  --run reports/acoustic/transport-g16/mse_balanced-seed0 \
+  --output reports/acoustic/transport-g16/fit-seed0
+```
+
+These commands train and inspect train/validation fits; they do not launch a new
+held-out evaluation. The two-case diagnostic also accepts `--transport d0_delta1`
+for a fresh transport fit or `--transport none` for its attention control; its default
+restores the source architecture. New independent campaigns can select transport
+at `prepare --transport d0_delta1 --output NEW_DIRECTORY`; their existing suite
+remains mass/MSE (plus spectral only with a frozen protocol). Do not resume an old
+campaign after changing source code or architecture. Loss-only comparison utilities
+reject mixed transports so an architecture change cannot masquerade as a loss effect.
+
+CPU verification covers operator agreement, adjoint gradients, active orientation
+flips, both coupling-direction overfits, checkpoint/resume and evaluation. Full
+GPU transport training, CUDA agreement, efficiency and generalization remain unmeasured.
+
 ## Executed validation (2026-11-04)
 
 - Original planar acceptance suite: 40 tests pass.

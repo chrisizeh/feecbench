@@ -103,6 +103,7 @@ def _parent_snapshot(parent):
                     settings[k] != config["training"][k] for k in ("width", "blocks", "slices", "lr", "accumulation")
                 )
                 or settings.get("adapter", "scalar") != "scalar"
+                or settings.get("transport", "none") != "none"
                 or settings["epochs_requested"] != config["training"]["epochs"]
                 or complete["updates"] != updates
             ):

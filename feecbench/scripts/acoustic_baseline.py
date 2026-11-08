@@ -41,6 +41,7 @@ def main():
         default="scalar",
         help="training adapter; evaluation restores the checkpoint adapter",
     )
+    parser.add_argument("--transport", choices=("none", "d0_delta1"), default="none")
     args = parser.parse_args()
     if args.epochs is not None and args.epochs < 1:
         parser.error("epochs must be positive")
@@ -51,6 +52,7 @@ def main():
         "smoke-data" if smoke else "development-data" if args.stage == "development" else "pilot-data"
     )
     adapter_suffix = "" if args.adapter == "scalar" else f"-{args.adapter}"
+    adapter_suffix += "" if args.transport == "none" else f"-{args.transport}"
     output = args.output or base / f"{'smoke' if smoke else 'run'}{adapter_suffix}-{args.objective}-seed{args.seed}"
     protocol = read_protocol(args.protocol) if args.protocol else None
     if args.stage == "pilot" and protocol is None:
@@ -114,6 +116,7 @@ def main():
             resume=args.resume,
             bands=bands,
             adapter=args.adapter,
+            transport=args.transport,
         )
     if args.stage in ("smoke", "pilot", "evaluate"):
         evaluate(root, output / "best.pt", output / "evaluation", device=args.device)

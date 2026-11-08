@@ -144,3 +144,44 @@ Design and implementation choices behind feecbench, with the reasoning for each.
     Best selection includes the parent history and explicitly labels inherited
     winners; final-budget checkpoints are evaluated separately. Both roles use
     train/validation diagnostics only, with no new OOD evaluation.
+
+24. **Typed transport is an explicit architecture option, not a loss change.**
+    `--transport d0_delta1` inserts simultaneous vertex/edge residual messages
+    before each slice-attention block. With requested-orientation incidence D0,
+    edge-sign matrix S and length matrix L, the messages are
+    `L^-1 S D0 Z0` and `M0^-1 D0.T M1 S L Z1`. Edge hidden channels use canonical
+    density coordinates, lifted to integral cochains before the codifferential.
+    They are learned features, not physical normalized p/u; physical scale ratios
+    are therefore not inserted into these latent maps. Full consistent M0 is solved
+    using multi-right-hand-side Jacobi-preconditioned CG on the tensor device,
+    with an implicit adjoint solve in backward, no dense inverse or CPU solve.
+    Convergence checks synchronize device scalars; GPU overhead must be profiled.
+    Float32/float64 tolerances are 1e-6/1e-10, with 64 iterations maximum and a
+    true-residual acceptance bound of five times the requested tolerance. Failed
+    solves raise; mixed precision and differentiation of mesh/operators are unsupported.
+    Channel LayerNorm and learned projections follow the differential maps; output
+    projections start at zero, preserving the paired baseline's initial function.
+    Width 128/four blocks adds 133,120 parameters (681,602 to 814,722), so matched
+    update budgets do not constitute a parameter- or runtime-matched comparison.
+    The baseline remains `--transport none`, with unchanged checkpoint state and
+    settings identity. New runs record transport and operator access; evaluation
+    restores them, resume rejects changes, and loss-only comparisons reject mixed
+    transports. Existing campaign source guards remain enforced. This is a first
+    acoustic C0/C1 transport variant, not the full multi-PDE Transformer–TNO and not
+    a guarantee of physical conservation, intrinsic equivariance or generalization.
+
+25. **The transport study separates architecture, objective and training budget.**
+    Twelve fresh runs pair no-transport/typed-transport, mass/balanced-MSE and seeds
+    0/1/2 on the same immutable corpus. Constant LR and update sampling remain fixed;
+    snapshots at 200 and 400 epochs preserve both selected-best and final states.
+    The longer budget resumes its own optimizer/RNG state, without overwriting the
+    earlier snapshot. Default training/evaluation covers train/validation only.
+    An explicit held-out stage requires every validation cell complete and evaluates
+    both budgets/roles, without choosing a winner from held-out outcomes. Previously
+    inspected held-out data remain exploratory evidence, not a fresh confirmatory set.
+    Every source HDF5 and the code/lockfile are hashed at preparation; the source
+    corpus is read-only. The preflight exercises active transport and gradients on
+    one training mesh, comparing CPU/CUDA on a CUDA invocation. Matched budgets do
+    not match capacity or compute; parameter counts, epoch times and last-invocation
+    CUDA peak allocation are recorded separately. Spectral loss, new IC/physics
+    ranges, learning-rate scheduling and a capacity-matched control are not added.
