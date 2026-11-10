@@ -10,7 +10,7 @@ from copy import deepcopy
 import numpy as np
 
 from ..evaluator import register_energy
-from ..schema import FEECSample, Field, IdBlock, MeshBlock, SolverMeta, TopologyBlock
+from ..schema import FEECSample, Field, IdBlock, MeshBlock, SolverMeta, TopologyBlock, surface_identity
 from .data import SurfaceSample
 from .geometry import validate_mesh
 from .operators import SurfaceOperators
@@ -38,8 +38,7 @@ def to_feec(surface: SurfaceSample) -> FEECSample:
     topology = validate_mesh(op.points, op.tris, op.genus)
     if not np.all(op.edges[:, 0] < op.edges[:, 1]):
         raise ValueError("conversion requires canonical low-to-high edge orientation")
-    label = meta["resolution"]
-    sid = meta.get('sample_id', f"{meta['config_id']}-{label}")
+    identity = surface_identity(meta)
     dt = meta["dt"]
     return FEECSample(
         mesh=MeshBlock(
@@ -61,8 +60,7 @@ def to_feec(surface: SurfaceSample) -> FEECSample:
             "betti2": topology["betti"][2], "t_snapshots": surface.times.tolist(),
             "offgrid": surface.offgrid.tolist(), "surface_metadata": meta,
         },
-        ids=IdBlock(meta["config_id"], sid, "medium" if label == "remeshed" else label,
-                    refinement="remeshed" if label == "remeshed" else "nested", split=meta["split"]),
+        ids=IdBlock(config_id=meta["config_id"], **identity, split=meta["split"]),
         topology=TopologyBlock(1, 2 * op.genus, *topology["betti"][:2], 0, 1, topology["betti"][2]),
         solver_meta=SolverMeta(
             meta["solver"], meta.get("solver_version", "unversioned"), dt,
