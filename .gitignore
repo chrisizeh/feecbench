@@ -11,3 +11,6 @@ feecbench/demo/pilot_data/
 feecbench/demo/figures/
 feecbench/demo/figures_pilot/
 feecbench/reports/
+
+# Generated experiment outputs when scripts run from the repository root.
+/reports/
