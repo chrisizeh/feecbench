@@ -1,441 +1,266 @@
-# Closed-Surface FEEC Acoustic Benchmark Plan
+# Unified Benchmark Review Follow-up
 
-## 1. Objective and status
+## Completion status — 10 November 2026
 
-Build a reproducible first experiment for learning acoustic dynamics on closed torus
-and multi-torus surfaces. Generate reference data with a lowest-order Whitney FEEC
-solver using PyDEC, validate it against MFEM, and run learning experiments through a
-shell script on a GPU node.
+Completed and independently reviewed. All three findings below are resolved:
 
-This document records the agreed direction and proposed implementation details. It
-does not imply that the new surface solver, data generator, metrics, or training
-scripts already exist. Implement in reviewable commits on
-`experiment/acoustic-baseline`; writing this plan does not start implementation.
+- Shared-profile surface evaluation selects the correct harmonic basis and honors
+  explicit overrides and disabled Hodge metrics.
+- Legacy index adaptation uses metadata without reading excluded sample arrays.
+- Portable legacy fixtures are committed with provenance and checksums; baseline
+  capture rejects the wrong source revision and existing destinations.
 
-Context:
+Implementation commits: `63dea5b` and `54cfba2` on `main`; integrated into the
+experiment branch by `21d7e33`.
 
-- Proposal: `/Users/chrisizeh/Downloads/PDE_Benchmark.pdf`, especially Section 1.3
-  (metrics), Section 4 (learning problem), and Sections 5–6 (meshes and experiments).
-- The user's clarification fixes the initial scope as **closed surfaces without
-  boundaries**, rather than the planar domains in the existing implementation.
-- The existing CPU acceptance suite passed: **40 tests**, with two PyTorch sparse
-  CSR warnings. This validates the current checkout, not the proposed surface oracle.
-- Use `uv` for reproducible Python environments. The eventual GPU job runs from a
-  direct terminal through a shell script; no Slurm integration is required.
+Final verification:
 
-## 2. Scientific scope
+- Main: **86 passed, 1 skipped** (optional MFEM backend unavailable).
+- Experiment branch: **134 passed, 3 skipped** (optional MFEM and two CUDA checks).
+- Focused migration/review tests: **22 passed**, with access to the old machine-local
+  reference directory blocked by a Python audit hook in the test process.
+- Ruff and Git whitespace checks passed.
 
-### Initial benchmark
+No outstanding findings from this review. GPU and optional MFEM execution were not
+revalidated in this environment. The sections below preserve the completed work's
+requirements and acceptance criteria; they are not pending implementation tasks.
 
-- Connected, closed, orientable two-dimensional surfaces embedded in three dimensions.
-- Torus, double torus, and triple torus: genus 1, 2, and 3.
-- Intrinsic, linear surface acoustics with constant sound speed `c = 1`.
-- Pressure is a scalar 0-form; velocity is a tangential 1-form represented by
-  oriented edge integrals at lowest order.
-- No boundaries, boundary conditions, forcing, or damping in the initial corpus.
-- Train on genus 1 and 2; hold out genus 3 for topology transfer.
+## Purpose and current state
 
-The learning task is
+The benchmark unification is implemented and committed locally. Its overall
+architecture matches the intended design: one shared sample, storage, dataset,
+normalization, and evaluation interface, with specialized surface numerical solvers.
+Do not redo the migration or restructure the repository.
 
-`(surface mesh, discrete operators, initial pressure, initial velocity, c, query time)`
-`-> (pressure at query time, velocity at query time)`.
+This plan replaces the previous implementation plan. Address the three findings
+below before considering the integration complete.
 
-The full reference sample retains physical parameters and solver metadata separately
-from learner-visible inputs. This preserves a future hidden-physics track without
-introducing it into the first experiment.
+Review baseline:
 
-### Deferred extensions
+- Local `main`: `40e1059` — shared benchmark integration.
+- Local `experiment/acoustic-baseline`: `850f917` — integrated benchmark plus
+  experiment compatibility changes.
+- Main tests: 72 passed, 1 skipped.
+- Experiment tests: 120 passed, 3 skipped.
+- Ruff passed.
+- Existing passing tests did not cover the two reproduced failures below, and some
+  migration tests rely on local temporary reference files.
 
-Variable material coefficients, diffusion/Darcy/Navier–Stokes, hidden constitutive
-physics, boundaries, higher-order elements, curved finite elements, adaptive mesh
-regimes, and large model comparisons are later work. The existing planar examples
-remain useful regression tests but do not substitute for the surface benchmark.
+Verify current Git state before starting. Read `AGENTS.md` and
+`feecbench/DECISIONS.md`. Preserve user changes and generated experiment artifacts.
+Work on a fix branch from current local `main`, preferably in a separate worktree.
+Keep model implementations on the experiment branch. Do not rewrite existing
+commits, regenerate experiment corpora, or weaken checkpoint/source hash guards.
 
-## 3. Repository gaps to address
+## 1. Fix shared-profile evaluation on surface samples
 
-Audit and extend the existing code rather than treating its naming as a mathematical
-classification. It already contains Whitney 1-form Galerkin assembly, but its current
-geometry and solver do not implement this planned benchmark.
+### Reproduced problem
 
-| Current behavior | Required change |
-| --- | --- |
-| Planar signed areas and globally counterclockwise triangles | Embedded-surface areas, tangent geometry, and globally consistent surface orientation |
-| Betti-number calculation assumes `beta2 = 0` | Closed-surface topology, with expected Betti numbers `(1, 2g, 1)` |
-| Lumped pressure mass and existing toy acoustic solver | Explicitly specified Whitney FEEC assembly and a validated reference integrator |
-| Zero initial velocity | Support harmonic initial velocity and nonzero circulation |
-| Fixed five training configurations per family | Configurable split counts and explicit manifests |
-| Loader omits coordinates/connectivity; tensors are float64 | Geometry-aware training adapter with explicit dtype handling |
-| Vertex-inclusion map only | Proper degree-specific transfer operators where needed |
-| Boundary metrics and no spectral bands | Closed-surface evaluation and spectral diagnostics |
+In `feecbench/src/feecbench/evaluator.py`, this documented call fails:
 
-Audit field conventions throughout the schema. In particular, distinguish top-form
-integral degrees of freedom from scalar cell values: their mass matrices have
-different normalizations. Do not reuse the existing `star2 = triangle areas`
-convention blindly for Whitney 2-form cochains.
+```python
+from feecbench import load_sample, evaluate_profile
 
-Update numerical documentation to distinguish consistent orientation on a curved
-surface from the planar counterclockwise convention. Keep old tests and formats
-working where feasible; version incompatible schema changes explicitly.
+sample = load_sample(surface_path)
+pred = {name: field.data for name, field in sample.fields.items()
+        if field.role == "target"}
+evaluate_profile(pred, sample, profile="planar")
+```
 
-## 4. Surface geometry and meshes
-
-Choose and prototype a reproducible generator for genus 1–3 surfaces. A parametric
-torus is straightforward; the multi-torus construction and meshing backend remain
-an implementation decision. Require smooth target geometry, no self-intersections,
-and a known genus. Validate the multi-torus construction before committing to it.
-
-Vary handle thickness, spacing, and shape within each genus. Normalize surface area
-to control global scale, while recording all rescaling. Match local geometric
-scales and mesh density across splits as closely as possible.
-
-For selected configurations, generate coarse, medium, and fine nested triangulations
-of the same target surface, plus independent remeshes. Start with piecewise-flat
-triangles in both solver backends. Record refinement/projection provenance and
-geometric approximation error; refinement of curved geometry is not automatically
-an exact nesting of finite-element function spaces.
-
-Mesh acceptance checks:
-
-- Every edge belongs to exactly two triangles; no boundary edges or nonmanifold vertices.
-- One connected component, consistent triangle orientation, and no degenerate elements.
-- Euler characteristic `V - E + F = 2 - 2g` and independently checked homology where practical.
-- Exact `d1 @ d0 == 0`, expected harmonic dimension `2g`, and valid mass matrices.
-- Mesh quality, area, edge-length distribution, aspect ratios, and pulse resolution.
-
-## 5. PyDEC-backed FEEC oracle
-
-Use **Whitney FEEC assembly from `hirani/pydec`**, not its separate diagonal DEC
-Hodge-star construction. Pin a tested repository revision: the unrelated package
-named `pydec` on PyPI must not be installed by mistake. Verify compatibility with
-the selected NumPy/SciPy versions in a small prototype.
-
-PyDEC supplies complexes and finite-element inner products; the project supplies
-the acoustic integrator, configuration interface, and dataset serialization.
-
-Initial discretization:
-
-- Continuous piecewise-linear scalar pressure space.
-- Lowest-order Whitney edge 1-form velocity space.
-- Consistent finite-element mass matrices `M0` and `M1`.
-- Incidence-based exterior derivatives with documented ordering and orientation.
-
-For `c = 1`, the semidiscrete acoustic system is
+With the default `include_hodge=True`, the evaluator calls the original harmonic
+basis routine, which now correctly rejects a non-diagonal pressure mass:
 
 ```text
-M0 dp/dt = D0.T M1 u
-   du/dt = -D0 p
-E = 0.5 * (p.T M0 p + u.T M1 u)
+ValueError: consistent star0 requires the surface harmonic backend
 ```
 
-Use implicit midpoint as the proposed initial reference integrator. Validate its
-energy behavior and temporal convergence. Reuse the reduced pressure-system
-factorization for a fixed mesh, coefficient, and timestep. Choose timesteps for
-accuracy even though the integrator avoids an explicit CFL stability restriction.
-
-Keep generation and reference calculations in float64. Generate data on CPU,
-parallelizing independent configurations with bounded memory and controlled BLAS
-thread counts. Training remains a separate GPU workload.
-
-## 6. Independent PyDEC–MFEM validation
-
-MFEM is a reference backend for a validation subset, not a requirement for every
-data-generation or training run. First establish a working embedded-surface
-assembly prototype in both backends; API support has not yet been demonstrated in
-this repository.
-
-### A. Equivalent operator assembly
-
-Use identical vertices, triangles, piecewise-flat geometry, physical coefficients,
-and equivalent lowest-order finite-element spaces. Independently assemble operators
-in each backend. Align vertex/edge ordering, edge signs, and basis normalization.
-
-Compare `M0`, `M1`, `D0`, and `K = D0.T @ M1 @ D0`. Report relative matrix norms and
-maximum entrywise discrepancies, with appropriate absolute checks for zero entries.
-Equivalent assembly on well-conditioned test meshes should agree near floating-point
-accuracy; determine acceptance tolerances from conditioning and measured residuals.
-
-### B. Equivalent trajectories
-
-Use identical initial cochains, coefficients, timesteps, output times, and initially
-the same midpoint scheme. Independently implement or invoke the stepping paths so
-the test does not merely run one shared solver twice.
-
-Compare pressure/velocity mass-weighted errors over time, energy histories, and
-harmonic projections. Comparing arbitrary harmonic eigenvector coordinates is
-invalid because basis signs and rotations are not unique.
-
-Start with one small torus, then use:
-
-`3 genera × 2 geometries × 3 resolutions × 2 IC families = 36 paired trajectories`.
-
-The two IC families are a pressure pulse and a pulse plus harmonic velocity.
-
-### C. Accuracy beyond agreement
-
-Two implementations can agree while sharing discretization error. Also require:
-
-- Spatial refinement and geometric convergence studies.
-- Temporal refinement with spatial error controlled.
-- Analytical or manufactured verification cases, separated from the unforced corpus.
-- Conservation and stationary-harmonic-field checks.
-- A different time-integration reference on a small subset where useful.
-
-Report cross-backend agreement and continuum-accuracy evidence separately. Reproduce
-relevant validation for these closed surfaces rather than importing the PDF's
-reported results as evidence for this implementation.
-
-## 7. Initial conditions and temporal sampling
-
-Provide three labelled IC families:
-
-1. One localized pressure pulse with zero initial velocity.
-2. Two pressure pulses with zero initial velocity, testing interference/superposition.
-3. A pressure pulse plus harmonic initial velocity, testing circulation preservation.
-
-Vary pulse centers, widths, amplitudes, and circulation strengths. Use intrinsic,
-smooth surface-localized pulses; choose the precise construction during the geometry
-prototype. Avoid inadvertently exciting nearby but geodesically distant handles.
-Record physical IC parameters independently of mesh IDs.
-
-All paired meshes must represent the same physical initial condition. For harmonic
-velocity, use a documented cycle/circulation prescription or validated transfer;
-do not reuse arbitrary eigenbasis coordinates across meshes.
-
-Proposed starting temporal grid: `T = 1` and 51 uniformly spaced snapshots. Inspect
-development trajectories before freezing this choice to ensure propagation explores
-the handles. Solver steps are independent of output sampling and selected through
-accuracy studies. More snapshots do not count as more independent configurations.
-
-## 8. Corpus sizes, splits, and leakage controls
-
-First build a roughly 32-configuration development corpus spanning all genera and
-IC families. Use it to validate correctness, generation cost, storage, and spectral
-preprocessing. Freeze the protocol before generating the first full corpus.
-
-Proposed full-run counts, subject to measured cost:
-
-| Partition | Configurations | Purpose |
-| --- | ---: | --- |
-| Training, genus 1 and 2 | 512 | Balanced topology and IC coverage |
-| Validation, genus 1 and 2 | 64 | Hyperparameters and checkpoint selection |
-| ID test, genus 1 and 2 | 64 | Unseen configurations from training distributions |
-| Geometry OOD, genus 1 and 2 | 64 | Held-out shape parameter ranges |
-| Topology OOD, genus 3 | 64 | Transfer to an unseen genus |
-
-A configuration comprises geometry, initial conditions, and physical parameters.
-Assign splits before meshing or temporal sampling. Keep all resolutions, remeshes,
-and snapshots of a configuration in the same partition. Track `geometry_id` as
-well as `config_id`; by default group shared geometries across train/validation/test
-to prevent accidental geometry leakage. Any intentional IC-only holdout on familiar
-geometry must be explicitly labelled.
-
-Train on medium resolution. Generate coarse, fine, and independently remeshed
-versions of the 64 ID test configurations. Normalize using training medium data
-only. Balance IC families deterministically in each applicable partition.
-
-Include all three IC families in the initial experiment. Define an additional
-IC-transfer manifest later that withholds one family; keep this separate from the
-topology holdout. Do not combine unseen circulation and unseen genus without a
-corresponding controlled comparison.
-
-Match pulse wavelengths, area, mesh density, and local geometric scales across
-topology splits. A genus change necessarily changes geometry; document remaining
-confounding factors rather than claiming a perfectly isolated topological change.
-
-## 9. Storage and generation workflow
-
-Retain the existing typed HDF5 sample approach where suitable. Store:
-
-- Mesh coordinates, connectivity, orientation, topology, and quality diagnostics.
-- Sparse FEEC operators, mass matrices, and their exact basis/DoF conventions.
-- Initial conditions, coefficient data, pressure/velocity snapshots, and actual times.
-- Configuration, geometry, resolution, split, and sample identifiers.
-- Transfer metadata and operators where validated.
-- Solver/backend versions, dependency revisions, numerical tolerances, seed,
-  runtime, and conservation diagnostics.
-
-Use manifests, atomic sample writes, and resumable generation. Validate configuration
-hashes before reusing outputs. Stream normalization statistics and bound mesh/operator
-caches rather than retaining the full corpus in memory. Record generation and
-spectral-preprocessing costs separately. Keep generated corpora out of Git.
-
-## 10. Evaluation metrics
-
-Compute metrics per configuration, then aggregate over configurations with equal
-weight. Report pressure and velocity separately, split by genus, IC family, and
-resolution. Include mean, median, and an upper-tail statistic; preserve per-sample
-results and time curves.
-
-### Spatial accuracy
-
-- Ordinary MSE/RMSE as familiar reference metrics.
-- Mass-weighted normalized RMSE as the primary cross-mesh accuracy metric.
-- Error versus time and final-time error.
-- Maximum error as a supplementary local diagnostic.
-
-Use trajectory-level normalization and safe floors for fields that vanish at some
-times. Report absolute errors alongside normalized errors. Raw edge-cochain MSE is
-resolution-sensitive because edge integrals change with edge length; label it as
-supplementary for resolution comparisons. Treat the supplied initial snapshot
-separately from predictions at positive times.
-
-### Surface spectral accuracy
-
-For pressure, solve `K phi = lambda M0 phi` with an `M0`-orthonormal basis and project
-using `a = Phi.T @ M0 @ p`. This is the surface analogue of Fourier analysis.
-
-- Report the constant pressure mode separately.
-- Define low/middle/high bands using fixed physical wavelength or nondimensional
-  eigenvalue thresholds; select them from development/training data and freeze them.
-- Do not use a fraction of each mesh's largest eigenvalue as the frequency definition.
-- Compare predicted and reference coefficients, retaining phase/sign information.
-- Keep degenerate eigenspaces together when selecting cutoffs where practical.
-- Compute modes through the middle-band cutoff. Obtain high-band squared error as
-  total mass-weighted error minus the resolved-band error, accounting for the
-  constant mode and numerical orthogonality. If using only truncated modes without
-  this complement, explicitly label the represented frequency range.
-
-Each mesh uses its own basis for comparing its prediction and target. Do not compare
-individual eigenvectors between different geometries without an alignment method.
-Cache bases on CPU and validate orthogonality/eigensolver residuals.
-
-Velocity spectral analysis requires a 1-form Hodge-Laplacian basis. Initially report
-velocity error decomposed into exact, coexact, and harmonic components; add its
-frequency bands after validating the full surface complex.
-
-### Physics and topology
-
-- Predicted energy versus the reference energy curve, plus drift from initial energy.
-- Reference solver energy drift beside prediction drift.
-- Conserved mean pressure/integral for the constant-coefficient closed system.
-- Closedness error, comparing predictions with reference behavior.
-- Harmonic-component error and drift, particularly for circulation ICs.
-
-Use projection-based harmonic comparisons within each mesh to avoid arbitrary basis
-signs/rotations. Boundary metrics do not apply to this corpus.
-
-### Resolution and remeshing
-
-First compare predictions against the reference solution on their own mesh. Report
-paired degradation from medium to coarse/fine/remeshed discretizations.
-
-Only add cross-resolution consistency and commuting-transfer metrics after defining
-and validating degree-specific transfer operators. Vertex slicing is not a general
-transfer rule for edge forms. Separate reference discretization error from learned
-prediction error and from transfer error.
-
-## 11. Training-loss experiments
-
-Compare three objectives with otherwise matched training conditions:
-
-1. Ordinary MSE, with separate pressure and velocity scaling.
-2. Mass-weighted MSE.
-3. Mass-weighted MSE plus band-balanced pressure spectral error.
-
-The weighted spatial objective uses `ep.T @ M0 @ ep` and `eu.T @ M1 @ eu`, with
-fixed training-derived scales and consistent per-sample normalization. Retain the
-full sparse velocity mass matrix. Choose scale floors for zero/near-zero fields.
-
-The spectral term needs nonuniform weighting or band balancing: a complete,
-uniformly weighted spectral squared error equals mass-weighted spatial squared
-error by Parseval and adds no distinct objective. Use training-derived band scales
-with floors and select the spectral coefficient on validation data only.
-
-Initially apply spectral loss to pressure. Keep energy and circulation as evaluation
-diagnostics; physics penalties are subsequent ablations. Pressure spectral projection
-is differentiable and can run on GPU after CPU preprocessing.
-
-## 12. Baseline model and training infrastructure
-
-Model work begins after the data and validation gates. The current recommendation
-is a small **Transolver-based** model for direct initial-state-plus-query-time
-prediction. This is a proposed adaptation, not an established SOTA result on this
-new benchmark.
-
-Proposed adapter: separate vertex/edge encoders, shared slice attention, and separate
-pressure/velocity output heads. Provide surface coordinates, edge midpoints,
-directions, lengths, initial fields, coefficient, and query time. Handle cochain
-orientation and edge-length scaling explicitly; do not treat edge integrals as
-ordinary point values. Specify which operators are actually consumed by each model.
-
-Proposed development defaults: four blocks, width 128, 32 slices, one mesh per batch
-with gradient accumulation. Confirm memory use on real meshes before fixing these.
-Prevent attention across unrelated samples when implementing batching.
-
-Use float32 initially, with explicit conversion from float64 references. Validate
-sparse loss gradients before enabling mixed precision. Provide fixed seeds,
-checkpoint/resume, best-validation checkpoint selection, configuration capture, and
-machine-readable metrics. Run three seeds for the first reported comparison.
-
-Include persistence and zero-prediction controls. A MeshGraphNet autoregressive
-baseline is follow-up work; distinguish recursive rollout metrics from direct
-query-time prediction. GINO and Transolver++ remain optional later comparisons.
-
-## 13. CPU checks and GPU shell workflow
-
-The proposed interface below is illustrative; these scripts do not yet exist:
-
-```bash
-bash scripts/run_acoustic_baseline.sh smoke --device cpu
-bash scripts/run_acoustic_baseline.sh pilot --device cuda --seed 0
-bash scripts/run_acoustic_baseline.sh pilot --device cuda --seed 0 --resume
+The numerical guard is correct. The evaluator's backend selection is wrong.
+
+### Required implementation
+
+1. Retain the existing default surface acoustic profile and all its metric meanings.
+2. Make the explicit `profile="planar"` path work on surface samples as documented.
+   This profile requests the original shared metrics; it must not force the use of
+   planar numerical assumptions.
+3. Preserve an explicitly supplied `harmonic` argument as the highest-priority basis.
+4. Otherwise, use the stored surface harmonic basis from the sample's auxiliary
+   arrays for surface samples. Validate its dimensions against the sample.
+5. If a surface basis is missing, use the correct surface backend or raise a clear,
+   specific error. Do not silently use a diagonal approximation or omit metrics.
+6. Preserve `include_hodge=False`: no harmonic-basis calculation should occur.
+7. Keep planar sample behavior and the consistent-mass guards unchanged.
+8. Preserve fresh-process energy registration; evaluation must not depend on a
+   conversion helper having been imported earlier.
+
+Consider whether the existing public `harmonic_basis(sample)` helper should handle
+surface samples centrally, so dispatch is not duplicated. Keep explicit-basis
+precedence in `evaluate_profile` regardless of where backend dispatch lives.
+
+### Acceptance tests
+
+Use deterministic surface fixtures independent of external temporary directories:
+
+- Exact surface predictions with `profile="planar"` return field, Hodge, and energy
+  metrics successfully.
+- Perturbed surface predictions agree with the correctly supplied-basis path.
+- An explicit harmonic argument is honored.
+- `include_hodge=False` avoids basis computation and omits Hodge metrics.
+- Missing or incorrectly shaped auxiliary bases have the chosen documented behavior.
+- Fresh-process shared-profile evaluation works without a prior adapter import.
+- Existing planar and default surface-profile outputs remain unchanged.
+
+Do not compare unlike surface/shared Hodge or closedness metrics as though their
+normalization and time aggregation were identical.
+
+## 2. Avoid eager corpus loading during legacy index adaptation
+
+### Reproduced problem
+
+`FEECDataset.__init__` currently calls `load_sample` for every legacy index entry
+missing canonical identity fields, before applying split or other filters.
+
+Consequences:
+
+- `FEECDataset(root, split="train")` fails if an excluded held-out file is not
+  downloaded, even when all training files are available.
+- Dataset construction reads all trajectories, operators, and spectral arrays,
+  making initialization unnecessarily expensive for large corpora.
+
+The failure was reproduced using an index containing one available training sample
+and one unavailable `id_test` sample.
+
+### Required implementation
+
+Primary file: `feecbench/src/feecbench/dataset.py`.
+
+1. Normalize known legacy surface index fields without reading sample arrays:
+   - `resolution` maps to `resolution_level` and `refinement` using the established
+     migration convention.
+   - Preserve an existing sample ID; otherwise derive the documented stable ID.
+   - Preserve paths, configuration IDs, split labels, and extra provenance fields.
+2. Share the identity-mapping logic with the compatibility adapter where practical,
+   so dataset entries and loaded samples cannot disagree.
+3. If file inspection is genuinely needed for a nonstandard entry, defer it until
+   the entry is requested. Read metadata only where possible, not full arrays.
+4. Apply filters using normalized index metadata. Support resolution/refinement
+   filters without opening unrelated samples.
+5. Keep the full normalized index for `get_config`; split filtering must not remove
+   its ability to find other discretizations of a requested configuration.
+6. Continue rejecting an index explicitly marked incomplete.
+7. Preserve a useful error when the caller actually requests a missing file.
+8. Do not rewrite legacy indexes or change corpus fingerprints as a side effect of
+   constructing a dataset.
+
+An unavailable file excluded by the requested view must not prevent construction
+or access to available samples. This does not authorize ignoring an explicitly
+incomplete corpus marker.
+
+### Acceptance tests
+
+- A legacy index with an available training sample and an unavailable held-out
+  sample supports constructing and reading the training view.
+- Constructing a dataset from ordinary legacy index metadata performs no full
+  `load_sample` calls; use a spy or monkeypatch to verify this directly.
+- Resolution and refinement filters work for coarse, medium, fine, and remeshed
+  legacy entries.
+- Derived IDs agree with `load_sample(...).ids`; explicit stored IDs are preserved.
+- `get_config` uses the full index and retains nested/remeshed behavior.
+- Requesting a missing selected sample raises a clear error.
+- Explicitly incomplete indexes are still rejected.
+- Legacy index bytes and fingerprints remain unchanged after dataset access.
+
+## 3. Make migration regression tests portable and dependable
+
+### Current problem
+
+`feecbench/tests/test_unified_api.py` defines:
+
+```python
+REFERENCE = Path('/private/tmp/feecbench-unification-reference')
 ```
 
-The launcher should resolve repository-relative paths, use the pinned environment,
-generate or validate data, train, evaluate, and save logs/artifacts. An explicit
-CUDA request must fail clearly if CUDA is unavailable. Keep MFEM validation an
-optional separate stage with its own environment/dependency setup.
+Five tests skip when `expected.json` is absent. These cover important migration
+parity, dataset/scaling, planar compatibility, and fresh-process behavior. Therefore
+a fresh checkout or CI can pass while failing to validate the migration.
 
-CPU acceptance includes schema round trips, split leakage checks, orientation
-handling, sparse weighted-loss gradients, spectral identities/bands, and a tiny
-overfit test. Verify CPU/GPU agreement on a small case when CUDA becomes available;
-CPU success alone does not establish CUDA support.
+`feecbench/scripts/capture_unification_baseline.py` also writes to that hard-coded
+directory. Its instruction to run against the old revision is only a docstring;
+there is no safeguard against accidentally replacing the baseline with outputs
+from the migrated implementation.
 
-Profile generation, eigensolves, training steps, inference, and evaluation separately.
-Do not promise a GPU runtime or memory budget before measurement. Save predictions
-for offline CPU reference evaluation, including expensive Hodge diagnostics.
+### Required implementation
 
-## 14. Milestones and completion gates
+1. Remove hard-coded machine-specific paths from ordinary regression tests.
+2. Make essential compatibility tests self-contained. Use deterministic fixtures
+   and pytest temporary directories for generated working files.
+3. Preserve independent pre-migration numerical references. Do not generate expected
+   outputs using the current implementation under test.
+4. Use compact committed fixture data under `feecbench/tests/` if practical, or a
+   reproducible, pinned fixture-artifact mechanism available to CI. Do not commit
+   a full generated corpus, large reports, or experiment outputs.
+5. Include old planar 0.1.0 and old surface-0.2.0 representations so compatibility
+   readers are actually exercised. A fixture saved by the new writer is not a
+   substitute for a legacy-format fixture.
+6. Record the baseline source revision (`21b97a7`), capture settings, and checksums
+   for frozen artifacts. Keep the baseline immutable during normal test runs.
+7. Update the capture script to accept an explicit output directory and verify that
+   it imports the intended pre-migration implementation before capture. Fail on
+   a wrong implementation or unsafe overwrite of an existing baseline.
+8. Document the exact baseline creation and validation commands in the existing
+   benchmark guide. Do not introduce another competing developer workflow.
+9. Missing required fixture data must fail clearly, not silently skip core tests.
+   Skips for genuinely optional numerical dependencies remain acceptable if reported.
 
-1. **Environment and geometry prototype:** pinned PyDEC, reproducible genus 1–3
-   meshes, manifold/topology checks, and embedded-surface assembly feasibility.
-2. **FEEC oracle:** consistent operators, midpoint stepping, nonzero harmonic ICs,
-   serialization, and numerical verification cases.
-3. **MFEM comparison:** aligned independent assembly, the 36-case validation subset,
-   reported residuals/errors, and separate convergence evidence.
-4. **Development corpus and metrics:** configurable splits, validated IC transfer,
-   spatial/spectral/physical diagnostics, and measured generation/storage costs.
-5. **Full pilot corpus:** frozen configuration manifests, validation reports, and
-   train-only normalization/spectral settings.
-6. **Learning smoke test:** adapted baseline, meaningful gradient checks, tiny-data
-   overfit, checkpoints, and CPU shell execution.
-7. **GPU experiments:** three loss variants, three seeds, reproducible evaluation,
-   and separate follow-up model/IC ablations.
+### Acceptance tests
 
-Commit each milestone in reviewable units on the experiment branch. Run the existing
-acceptance suite and focused new checks appropriate to each change. Preserve the
-existing `AGENTS.md` unless a later task explicitly authorizes editing it.
+With the supported development/surface dependencies installed, a clean checkout
+without `/private/tmp/feecbench-unification-reference` must execute the migration
+checks successfully:
 
-## 15. First deliverables
+- Legacy planar load and new-format round trip.
+- Legacy surface load and new-format round trip, including sparse operators and
+  auxiliary arrays.
+- Frozen planar and surface numerical parity for exact and perturbed predictions.
+- Positive-time, regular-query, and off-grid surface subsets.
+- Surface normalization parity and held-out-data exclusion.
+- Fresh-process evaluation without accidental import-order dependencies.
+- The evaluator and index-adaptation regressions from steps 1 and 2.
 
-- Reproducible PyDEC-backed FEEC acoustic oracle for closed surfaces.
-- Independent MFEM comparison report with operator and trajectory discrepancies.
-- Versioned dataset manifests and generation/quality/convergence diagnostics.
-- CPU smoke and direct-terminal GPU launch scripts.
-- Checkpoints, configurations, dependency revisions, seeds, and per-sample results.
-- Main table with ID, geometry OOD, topology OOD, coarse, fine, and remeshed rows;
-  pressure/velocity error, spectral bands, energy, and harmonic-error columns.
-- Error-versus-time and error-versus-resolution plots, representative field/error
-  visualizations, and measured cost/memory results.
+Use scientifically justified numerical tolerances where bit-exact floating-point
+results are not portable. Require exact preservation for stored arrays, metadata,
+and sparse representation where the persistence contract demands it.
 
-## 16. References
+## Validation and integration sequence
 
-- [PyDEC repository and installation instructions](https://github.com/hirani/pydec)
-- [PyDEC paper](https://arxiv.org/abs/1103.3076)
-- [FEEC foundations: Arnold, Falk, and Winther](https://sites.math.rutgers.edu/~falk/papers/bulletin-8-13-09.pdf)
-- [MFEM finite-element integrators](https://mfem.org/integration/)
-- [MFEM embedded-surface example](https://docs.mfem.org/4.9/ex29_8cpp_source.html)
-- [PDEBench](https://arxiv.org/abs/2210.07182)
-- [Generalized surface Fourier analysis](https://pmc.ncbi.nlm.nih.gov/articles/PMC4401437/)
-- [Transolver paper](https://arxiv.org/abs/2402.02366) and [implementation](https://github.com/thuml/Transolver)
-- [MeshGraphNets implementation](https://github.com/google-deepmind/deepmind-research/tree/master/meshgraphnets)
+1. Add regression coverage for the reproduced failures before or alongside each fix.
+2. Run focused evaluator, dataset, I/O, normalization, and migration tests.
+3. Verify which worktree the Python interpreter imports. An editable installation
+   can point at another checkout; use an explicit `PYTHONPATH` when needed.
+4. Run the complete benchmark suite and Ruff from the integration worktree:
+
+   ```sh
+   cd feecbench
+   export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+   python -m ruff check .
+   python -m pytest -q
+   ```
+
+5. Confirm the tests do not access the old machine-local reference directory. Do
+   not delete existing user reference artifacts to test this; use an isolated
+   test configuration or instrument path access.
+6. Review changes for numerical-contract, identity, and fingerprint preservation.
+7. Commit benchmark fixes in reviewable units. Merge validated fixes into local
+   `main`, then merge `main` into the experiment branch without rewriting history.
+8. Run the full experiment suite after integration. Preserve checkpoint behavior
+   and source/corpus hash guards.
+9. Report commits, test results, skip reasons, and any remaining limitations.
+   Do not push remote branches unless requested.
+
+## Completion criteria
+
+- The documented shared evaluation profile works on surface samples.
+- Legacy dataset construction is metadata-driven and does not load excluded data.
+- Migration regression tests run reproducibly on a fresh checkout or CI.
+- Existing planar and surface numerical results remain unchanged.
+- Benchmark fixes live on `main`; experiment code remains on its branch.
+- No corpus, fingerprint, checkpoint, or unrelated user file is silently changed.
