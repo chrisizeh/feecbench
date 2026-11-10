@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .data import SurfaceSample, atomic_json, digest, load, save, validate_manifest
+from .data import SurfaceSample, atomic_json, digest, load, validate_manifest
 from .geometry import Geometry, generate
 from .initial import angular_harmonic, reference_initial, scalar_transfer
 from .operators import PYDEC_REVISION, assemble, harmonic_basis
@@ -31,7 +31,8 @@ def generate_corpus(
         "modes": modes,
         "paired": paired,
         "pydec_revision": PYDEC_REVISION,
-        "generator_version": 2,
+        "generator_version": 3,
+        "storage_schema": "0.2.0",
         "schema": manifest["version"],
     }
     fingerprint = digest({"manifest": manifest, "settings": settings})
@@ -44,6 +45,7 @@ def generate_corpus(
             raise ValueError("existing corpus configuration hash mismatch; use a new output directory")
     atomic_json(manifest_path, {"fingerprint": fingerprint, "settings": settings, **manifest})
     entries = []
+    atomic_json(root / "index.json", {"fingerprint": fingerprint, "samples": [], "complete": False})
     for number, item in enumerate(manifest["configurations"], 1):
         start = time.perf_counter()
         geometry = Geometry(**item["geometry"])
@@ -53,9 +55,14 @@ def generate_corpus(
         pending = []
         for label in variants:
             path = root / item["config_id"] / f"{label}.h5"
-            entry = {"path": str(path.relative_to(root)), **item, "resolution": label}
+            entry = {"path": str(path.relative_to(root)), **item, "resolution": label,
+                     "resolution_level": "medium" if label == "remeshed" else label,
+                     "refinement": "remeshed" if label == "remeshed" else "nested"}
             entries.append(entry)
             if path.exists():
+                from ..io import load_sample
+
+                entry["sample_id"] = load_sample(path).ids.sample_id
                 if load(path).metadata.get("fingerprint") != fingerprint:
                     raise ValueError(f"sample hash mismatch: {path}")
             else:
@@ -75,6 +82,7 @@ def generate_corpus(
         p_ref, psi_ref, coeff, ic = reference_initial(reference, rv, rphi, item["family"], item["ic_seed"], centers)
         ref_hash = digest({"points": rp.tolist(), "triangles": rt.tolist(), "ic": ic})
         for label, path in pending:
+            entry = next(e for e in entries if e["path"] == str(path.relative_to(root)))
             if label == "remeshed":
                 points, tris, mesh_meta = generate(geometry, 2 * grid + 1, phase=0.37)[0]
             else:
@@ -119,7 +127,14 @@ def generate_corpus(
                 "reference_spectral_seconds": reference_spectral_seconds,
                 "status": "development; reference-resolution/protocol gates required",
             }
-            save(path, SurfaceSample(ops, times, pressure, velocity, values, vectors, harmonic, metadata, offgrid))
+            from ..io import _save_atomic
+            from .compat import to_feec
+
+            shared = to_feec(SurfaceSample(
+                ops, times, pressure, velocity, values, vectors, harmonic, metadata, offgrid
+            ))
+            _save_atomic(shared, path)
+            entry["sample_id"] = shared.ids.sample_id
         atomic_json(root / "index.json", {"fingerprint": fingerprint, "samples": entries, "complete": False})
     atomic_json(root / "index.json", {"fingerprint": fingerprint, "samples": entries, "complete": True})
     return entries

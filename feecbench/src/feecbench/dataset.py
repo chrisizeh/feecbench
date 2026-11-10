@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -39,7 +39,17 @@ class FEECDataset(Dataset):
         normalize: str | None = None,
     ):
         self.root = Path(root)
-        self._all_entries = json.loads((self.root / "index.json").read_text())["samples"]
+        self.index_metadata = json.loads((self.root / "index.json").read_text())
+        if self.index_metadata.get("complete") is False:
+            raise ValueError("corpus is explicitly incomplete")
+        self._all_entries = []
+        for original in self.index_metadata["samples"]:
+            entry = dict(original)
+            if "resolution_level" not in entry or "sample_id" not in entry:
+                sample = load_sample(self.root / entry["path"])
+                entry.update(sample_id=sample.ids.sample_id, resolution_level=sample.ids.resolution_level,
+                             refinement=sample.ids.refinement)
+            self._all_entries.append(entry)
         wanted = {**(filters or {}), **({"split": split} if split is not None else {})}
         self.entries = [e for e in self._all_entries if all(e.get(k) == v for k, v in wanted.items())]
         if not self.entries:
@@ -72,6 +82,9 @@ class FEECDataset(Dataset):
             "resolution_level": s.ids.resolution_level,
             "split": s.ids.split,
             "params": s.params,
+            "star_types": s.star_types,
+            "orientation_convention": s.mesh.orientation_convention,
+            "auxiliary": s.auxiliary,
             "normalized": self.normalizer.mode if self.normalizer else None,
         }
 
@@ -100,6 +113,9 @@ class FEECBatch:
     params: list[dict]
     boundary_vertices: torch.Tensor
     boundary_edges: torch.Tensor
+    star_types: list[dict] = field(default_factory=list)
+    auxiliary: list[dict] = field(default_factory=list)
+    orientation_conventions: list[str] = field(default_factory=list)
 
     @property
     def num_samples(self) -> int:
@@ -111,6 +127,7 @@ class FEECBatch:
         return FEECBatch(
             mv(self.fields), self.field_meta, mv(self.operators), mv(self.batch_index), self.n_cells,
             self.sample_ids, self.params, self.boundary_vertices.to(device), self.boundary_edges.to(device),
+            self.star_types, self.auxiliary, self.orientation_conventions,
         )
 
 
@@ -125,7 +142,17 @@ def _to_torch_csr(m: sp.csr_matrix) -> torch.Tensor:
 
 def collate_feec(batch: list[dict]) -> FEECBatch:
     """Disjoint-union collate; raises ValueError on heterogeneous field schemas."""
+    if not batch:
+        raise ValueError("collate_feec: empty batch")
     meta = batch[0]["field_meta"]
+    for item in batch:
+        for name, values in item["fields"].items():
+            if name not in meta or item["field_meta"] != meta:
+                raise ValueError("collate_feec: heterogeneous field schemas")
+            if values.shape[:-1] != batch[0]["fields"][name].shape[:-1]:
+                raise ValueError(f"collate_feec: incompatible query lengths for {name}")
+            if values.shape[-1] != item["n_cells"][meta[name]["form_degree"]]:
+                raise ValueError(f"collate_feec: invalid cell dimension for {name}")
     for item in batch[1:]:
         if item["field_meta"] != meta:
             raise ValueError(
@@ -147,4 +174,7 @@ def collate_feec(batch: list[dict]) -> FEECBatch:
         params=[it["params"] for it in batch],
         boundary_vertices=torch.cat([it["boundary_vertices"] for it in batch]),
         boundary_edges=torch.cat([it["boundary_edges"] for it in batch]),
+        star_types=[it.get("star_types", {}) for it in batch],
+        auxiliary=[it.get("auxiliary", {}) for it in batch],
+        orientation_conventions=[it.get("orientation_convention", "") for it in batch],
     )

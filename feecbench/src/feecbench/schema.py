@@ -10,12 +10,13 @@ Unused cochain degrees are simply absent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 
 import numpy as np
 import scipy.sparse as sp
 
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.2.0"
+SUPPORTED_VERSIONS = ("0.1.0", SCHEMA_VERSION)
 LEVELS = ("coarse", "medium", "fine")
 FIELD_ROLES = ("input", "target", "coefficient")
 ORIENTATION = "edges_low_to_high; tris_ccw; d_k in R^{n_{k+1} x n_k}"
@@ -38,7 +39,7 @@ class Field:
 
 @dataclass
 class MeshBlock:
-    points: np.ndarray  # (n0, 2) float64
+    points: np.ndarray  # (n0, 2) planar or (n0, 3) embedded surface
     edges: np.ndarray  # (n1, 2) int64, sorted pairs i < j, lexicographic
     tris: np.ndarray  # (n2, 3) int64, counter-clockwise
     boundary_vertices: np.ndarray  # (n0,) bool
@@ -70,6 +71,8 @@ class TopologyBlock:
     betti0_computed: int
     betti1_computed: int
     n_boundary_components: int
+    betti2: int = 0
+    betti2_computed: int = 0
 
 
 @dataclass
@@ -77,10 +80,10 @@ class SolverMeta:
     solver_name: str
     solver_version: str
     dt: float
-    cfl: float
+    cfl: float | None
     seed: int
     runtime_seconds: float
-    cfl_satisfied: bool
+    cfl_satisfied: bool | None
     energy_drift_rel: float  # max relative drift of the exactly conserved discrete energy
     bc_type: str = "sound_hard"
     notes: str = ""
@@ -96,6 +99,7 @@ class FEECSample:
     ids: IdBlock
     topology: TopologyBlock
     solver_meta: SolverMeta
+    auxiliary: dict[str, np.ndarray] = field(default_factory=dict)
 
     def summary(self) -> str:
         n0, n1, n2 = self.mesh.n_cells

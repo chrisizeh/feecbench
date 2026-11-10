@@ -87,7 +87,7 @@ Design and implementation choices behind feecbench, with the reasoning for each.
 
 16. **HDF5 attrs are round-tripped generically** (`vars()` → attrs, `np.generic.item()`
     back), so schema blocks can grow without touching `io.py`. `schema_version = "0.1.0"`;
-    files written under an older schema_version are refused — regenerate.
+    the shared compatibility reader now accepts both 0.1.0 and 0.2.0.
 
 17. **Mesh quality is checked from gmsh stats** — min angle > 20° on every level, with
     quality statistics stored per sample.
@@ -185,3 +185,27 @@ Design and implementation choices behind feecbench, with the reasoning for each.
     not match capacity or compute; parameter counts, epoch times and last-invocation
     CUDA peak allocation are recorded separately. Spectral loss, new IC/physics
     ranges, learning-rate scheduling and a capacity-matched control are not added.
+
+
+## Shared planar and surface workflow
+
+Use `load_sample(path)`, `FEECDataset(root, split="train")`,
+`collate_feec(items)`, and `evaluate_profile(predictions, sample)` for either family.
+Surface predictions use `p` and `u`. The evaluator selects the surface acoustic
+profile from the sample PDE; `profile="planar"` explicitly selects original metrics,
+and `profile="surface_acoustic"` retains the complete surface score structure.
+Surface geometry, full consistent mass solves and midpoint dynamics stay in `surface/`.
+
+Shared writes use schema 0.2.0 and atomic replacement; readers retain planar 0.1.0
+and surface-0.2.0 compatibility. Legacy corpora and indexes are adapted in memory.
+Legacy sample identities use `<config_id>-<resolution>` unless a sample ID is stored.
+Remeshed surfaces are medium resolution, with refinement tracked independently.
+Fingerprint indexes cannot be replaced by directory scans, and incomplete indexes fail.
+New surface generation uses generator contract 3 and rejects older resume settings.
+
+`compute_stats(samples, policy="surface_energy")` fits training-medium regular-query
+energy per area with equal configuration weights and no centering. Use RMS mode.
+The original `compute_stats(samples)` and field-keyed statistics remain supported;
+`policy="star_weighted"` explicitly filters training data. `load_full()` stays raw.
+Batch compatible field schemas and query shapes together; query coordinates, operator
+types and auxiliary spectral arrays remain available per sample.

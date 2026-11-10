@@ -12,7 +12,9 @@ dataset; None-valued attrs are absent, never aliased to ""); ``topology/`` and
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import h5py
 import numpy as np
@@ -20,6 +22,7 @@ import scipy.sparse as sp
 
 from .schema import (
     SCHEMA_VERSION,
+    SUPPORTED_VERSIONS,
     FEECSample,
     Field,
     IdBlock,
@@ -38,7 +41,22 @@ def _py(v):
 
 def save_sample(sample: FEECSample, root: str | Path) -> Path:
     path = Path(root) / sample.ids.config_id / f"{sample.ids.sample_id}.h5"
+    _save_atomic(sample, path)
+    return path
+
+
+def _save_atomic(sample: FEECSample, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile(dir=path.parent, prefix=".pending-", delete=False) as stream:
+        tmp = Path(stream.name)
+    try:
+        _write_sample(sample, tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _write_sample(sample: FEECSample, path: Path) -> None:
     with h5py.File(path, "w") as f:
         f.attrs["schema_version"] = SCHEMA_VERSION
         g = f.create_group("mesh")
@@ -68,15 +86,25 @@ def save_sample(sample: FEECSample, root: str | Path) -> Path:
             elif key != "prolongation" and val is not None:
                 g.attrs[key] = val
         f.create_group("topology").attrs.update(vars(sample.topology))
-        f.create_group("solver_meta").attrs.update(vars(sample.solver_meta))
+        f.create_group("solver_meta").attrs.update(
+            {k: v for k, v in vars(sample.solver_meta).items() if v is not None}
+        )
+        g = f.create_group("auxiliary")
+        for name, values in sample.auxiliary.items():
+            g.create_dataset(name, data=values)
     return path
 
 
 def load_sample(path: str | Path) -> FEECSample:
     with h5py.File(path, "r") as f:
         version = f.attrs.get("schema_version")
-        if version != SCHEMA_VERSION:
-            raise ValueError(f"{path}: schema_version {version!r} != {SCHEMA_VERSION!r}; regenerate the file")
+        if version is None and f.attrs.get("version") == "surface-0.2.0":
+            from .surface.compat import to_feec
+            from .surface.data import load
+
+            return to_feec(load(path))
+        if version not in SUPPORTED_VERSIONS:
+            raise ValueError(f"{path}: unsupported schema version {version or f.attrs.get('version')!r}")
         g = f["mesh"]
         mesh = MeshBlock(
             *(g[name][()] for name in MESH_ARRAYS[:3]),
@@ -92,6 +120,8 @@ def load_sample(path: str | Path) -> FEECSample:
         for name, og in f["operators"].items():
             shape = tuple(int(s) for s in og.attrs["shape"])
             operators[name] = sp.csr_matrix((og["data"][()], og["indices"][()], og["indptr"][()]), shape=shape)
+            operators[name].indices = og["indices"][()]
+            operators[name].indptr = og["indptr"][()]
             if "star_type" in og.attrs:
                 star_types[name] = str(og.attrs["star_type"])
         params = json.loads(f["params_json"][()].decode())
@@ -99,13 +129,19 @@ def load_sample(path: str | Path) -> FEECSample:
         ids = IdBlock(**{k: _py(v) for k, v in g.attrs.items()})
         ids.prolongation = g["prolongation"][()] if "prolongation" in g else None
         topology = TopologyBlock(**{k: _py(v) for k, v in f["topology"].attrs.items()})
-        solver_meta = SolverMeta(**{k: _py(v) for k, v in f["solver_meta"].attrs.items()})
-    return FEECSample(mesh, fields, operators, star_types, params, ids, topology, solver_meta)
+        solver_meta = SolverMeta(**{
+            "cfl": None, "cfl_satisfied": None, **{k: _py(v) for k, v in f["solver_meta"].attrs.items()}
+        })
+        auxiliary = {k: v[()] for k, v in f.get("auxiliary", {}).items()}
+    return FEECSample(mesh, fields, operators, star_types, params, ids, topology, solver_meta, auxiliary)
 
 
 def write_index(root: str | Path, splits: dict[str, str] | None = None) -> Path:
     """Scan ``root`` for sample files and write ``index.json`` (``splits`` overrides stored labels)."""
     root, entries = Path(root), []
+    existing = root / "index.json"
+    if existing.exists() and "fingerprint" in json.loads(existing.read_text()):
+        raise ValueError("cannot replace a fingerprinted corpus index with a directory scan")
     for path in sorted(root.glob("*/*.h5")):
         with h5py.File(path, "r") as f:
             a = {k: _py(v) for k, v in f["ids"].attrs.items()}

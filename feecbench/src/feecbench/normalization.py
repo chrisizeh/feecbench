@@ -35,10 +35,36 @@ def _moments(acc: dict) -> dict:
     return {"mean": mean, "std": float(np.sqrt(max(rms**2 - mean**2, 0.0))), "rms": rms}
 
 
-def compute_stats(samples) -> dict:
+def compute_stats(samples, *, policy=None) -> dict:
     """Star-weighted mean/std/rms (+ ``delta`` moments for time series) per field."""
+    if policy == "surface_energy":
+        from .surface.compat import from_feec
+
+        totals, seen = np.zeros(2), set()
+        for shared in samples:
+            if (shared.ids.split != "train" or shared.ids.resolution_level != "medium"
+                    or shared.ids.refinement == "remeshed"):
+                continue
+            s = from_feec(shared)
+            cid = shared.ids.config_id
+            if s.ops.genus == 3 or cid in seen:
+                raise ValueError("genus-3 or duplicate training configuration")
+            seen.add(cid)
+            selected = ~s.offgrid
+            for i, (values, mass) in enumerate(((s.pressure, s.ops.m0), (s.velocity, s.ops.m1))):
+                x = values[selected]
+                totals[i] += np.einsum("ti,it->", x, mass @ x.T) / len(x) / s.ops.area
+        if not seen:
+            raise ValueError("no training medium data")
+        scales = np.maximum(np.sqrt(totals / len(seen)), 1e-8)
+        return {"version": 1, "policy": policy, "provenance": {"configurations": sorted(seen)},
+                "fields": {n: {"rms": float(scales[i])} for n, i in (("p", 0), ("p0", 0), ("u", 1), ("u0", 1))}}
+    if policy not in (None, "star_weighted"):
+        raise ValueError(f"unknown normalization policy {policy!r}")
     acc: dict[str, dict] = {}
     for s in samples:
+        if policy is not None and s.ids.split != "train":
+            continue
         for name, fld in s.fields.items():
             star = s.operators[f"star{fld.form_degree}"]
             ones = np.ones(star.shape[0])
@@ -49,10 +75,13 @@ def compute_stats(samples) -> dict:
             if fld.data.ndim == 2:
                 a["series"] = True
                 _accumulate(a["dz"], np.diff(z, axis=0), star, ones, vol)
-    return {
+    result = {
         name: {"form_degree": a["degree"], **_moments(a["z"]), **({"delta": _moments(a["dz"])} if a["series"] else {})}
         for name, a in acc.items()
     }
+    if policy is not None:
+        return {"version": 1, "policy": policy, "provenance": {"split": "train"}, "fields": result}
+    return result
 
 
 def _zero() -> dict:
@@ -77,6 +106,12 @@ class Normalizer:
     def __init__(self, stats: dict, mode: str):
         if mode not in self.MODES:
             raise ValueError(f"normalize mode {mode!r} not in {self.MODES}")
+        if "policy" in stats:
+            if stats.get("version") != 1 or stats["policy"] not in ("star_weighted", "surface_energy"):
+                raise ValueError("unsupported statistics version or policy")
+            if stats["policy"] == "surface_energy" and mode != "rms":
+                raise ValueError("surface_energy supports rms mode only")
+            stats = stats["fields"]
         self.stats, self.mode = stats, mode
 
     def _scale_shift(self, name: str) -> tuple[float, float]:

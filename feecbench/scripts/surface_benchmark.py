@@ -12,9 +12,9 @@ for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
 
 import numpy as np
 
+from feecbench import evaluate_profile, load_sample
 from feecbench.surface.corpus import generate_corpus
 from feecbench.surface.data import atomic_json, load, make_manifest
-from feecbench.surface.metrics import score
 from feecbench.surface.protocol import read_protocol
 
 
@@ -54,7 +54,8 @@ def main():
         with np.load(args.predictions, allow_pickle=False) as prediction:
             if not np.array_equal(prediction["times"], sample.times):
                 raise ValueError("prediction times must exactly match sample times")
-            metrics = score(sample, prediction["pressure"], prediction["velocity"],
+            metrics = evaluate_profile({"p": prediction["pressure"], "u": prediction["velocity"]},
+                                       load_sample(args.sample), profile="surface_acoustic",
                             thresholds=protocol["thresholds"] if protocol else (10.0, 30.0))
         atomic_json(args.output, {
             "sample_sha256": hashlib.sha256(args.sample.read_bytes()).hexdigest(),
