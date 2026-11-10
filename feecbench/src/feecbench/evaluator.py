@@ -107,10 +107,30 @@ def evaluate_profile(
     target: dict[str, np.ndarray] | None = None,
     include_hodge: bool = True,
     harmonic: np.ndarray | None = None,
+    *,
+    profile: str = "planar",
+    selected: np.ndarray | None = None,
 ) -> dict:
     """Metric profile of ``pred`` (keyed like the sample's target fields) against ``target``
     (default: the sample's role == "target" fields). ``include_hodge=False`` skips the
     harmonic-basis solve; ``harmonic`` supplies a precomputed basis."""
+    if profile == "surface_acoustic":
+        from .surface.compat import from_feec
+        from .surface.metrics import score
+
+        if target is not None:
+            from dataclasses import replace
+
+            sample = replace(sample, fields={**sample.fields, **{
+                n: replace(sample.fields[n], data=v) for n, v in target.items()
+            }})
+        return score(from_feec(sample), pred["p"], pred["u"], selected=selected)
+    if profile != "planar":
+        raise ValueError(f"unknown evaluation profile {profile!r}")
+    if sample.params.get("pde") == "surface_acoustic":
+        from .surface.compat import acoustic_energy
+
+        register_energy("surface_acoustic")(acoustic_energy)
     if target is None:
         target = {n: f.data for n, f in sample.fields.items() if f.role == "target"}
     profile: dict = {"fields": {}}

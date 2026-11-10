@@ -131,6 +131,8 @@ def _local_edge_ids(cx: Complex) -> np.ndarray:
 
 def codifferential1(d0, star0, star1) -> sp.csr_matrix:
     """delta1 = star0^{-1} d0^T star1 (star0 is diagonal, so this stays sparse)."""
+    if (star0 - sp.diags(star0.diagonal())).nnz:
+        raise ValueError("consistent star0 requires the surface solve-based backend")
     return (sp.diags(1.0 / star0.diagonal()) @ (d0.T.astype(np.float64) @ star1)).tocsr()
 
 
@@ -182,6 +184,8 @@ def harmonic_1forms(d0, d1, star0, star1, star2, beta1: int, tol: float = 1e-8) 
     if beta1 == 0:
         return np.zeros((star1.shape[0], 0))
     d0f, d1f = d0.astype(np.float64), d1.astype(np.float64)
+    if (star0 - sp.diags(star0.diagonal())).nnz:
+        raise ValueError("consistent star0 requires the surface harmonic backend")
     inv0 = sp.diags(1.0 / star0.diagonal())
     a = (d1f.T @ star2 @ d1f + star1 @ d0f @ inv0 @ d0f.T @ star1).tocsc()
     vals, vecs = spla.eigsh(a, k=min(beta1 + 3, a.shape[0] - 2), M=star1.tocsc(), sigma=-1e-2)
