@@ -132,3 +132,7 @@ for setup, executed validation, numerical conventions, and the remaining protoco
 ```bash
 bash scripts/run_acoustic_baseline.sh smoke --device cpu
 ```
+
+## Shared benchmark
+
+See [SURFACE_BENCHMARK.md](SURFACE_BENCHMARK.md) for the standalone benchmark on `main`.

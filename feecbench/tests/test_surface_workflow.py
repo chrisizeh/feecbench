@@ -109,3 +109,27 @@ def test_reference_check_rejects_partial_index(corpus, tmp_path):
     atomic_json(tmp_path / "manifest.json", json.loads((root / "manifest.json").read_text()))
     with pytest.raises(ValueError, match="complete corpus"):
         check_references(tmp_path, tmp_path / "reference.json")
+
+
+def test_standalone_prediction_scoring(corpus, tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root, _, entries, _ = corpus
+    sample_path = root / entries[0]["path"]
+    sample = load(sample_path)
+    predictions = tmp_path / "predictions.npz"
+    output = tmp_path / "scores.json"
+    np.savez(predictions, times=sample.times, pressure=sample.pressure, velocity=sample.velocity)
+    command = [sys.executable, str(Path(__file__).resolve().parents[1] / "scripts/surface_benchmark.py"),
+               "score", "--sample", str(sample_path), "--predictions", str(predictions), "--output", str(output)]
+    subprocess.run(command, check=True)
+    result = json.loads(output.read_text())
+    assert result["metrics"]["pressure"]["mass_rmse"] == 0
+    assert result["metrics"]["velocity"]["mass_rmse"] == 0
+    assert result["sample_sha256"] == hashlib.sha256(sample_path.read_bytes()).hexdigest()
+    np.savez(predictions, times=sample.times + 0.01, pressure=sample.pressure, velocity=sample.velocity)
+    rejected = subprocess.run(command, capture_output=True, text=True)
+    assert rejected.returncode != 0
+    assert "prediction times must exactly match" in rejected.stderr
