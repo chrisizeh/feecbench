@@ -1,0 +1,98 @@
+{
+  "samples": [
+    {
+      "path": "baseline-12/medium.h5",
+      "config_id": "baseline-12",
+      "resolution": "medium",
+      "split": "train",
+      "seed": 12,
+      "dt": 0.01,
+      "solver": "implicit_midpoint",
+      "integration_seconds": 0.0,
+      "energy_drift": 1.3403558226398326e-15,
+      "geometry_source": {
+        "geometry": {
+          "genus": 1,
+          "radius": 0.32,
+          "spacing": 1.1,
+          "thickness": 0.55,
+          "stretch": 1.0,
+          "area": 16.0
+        },
+        "generator": "implicit_double_v1",
+        "grid": 12,
+        "phase": 0.0,
+        "level": 0,
+        "scale": 1.5087932329807794,
+        "projection_residual": 8.243405957841787e-15,
+        "geometry_error": 0.059189389294254297,
+        "quality": {
+          "betti": [
+            1,
+            2,
+            1
+          ],
+          "euler": 0,
+          "area": 15.66356793812887,
+          "edge_min": 0.038407419050892344,
+          "edge_median": 0.31801253559161974,
+          "edge_max": 0.5268301641868539,
+          "area_min": 0.0017418785248047492,
+          "area_max": 0.0664634374378133,
+          "shape_quality_min": 0.1267824617544395,
+          "shape_quality_median": 0.8482191830250774
+        },
+        "transfer": "projected refinement; no FE commuting map claimed"
+      },
+      "coefficient": 1.0
+    },
+    {
+      "path": "baseline-14/medium.h5",
+      "config_id": "baseline-14",
+      "resolution": "medium",
+      "split": "train",
+      "seed": 14,
+      "dt": 0.01,
+      "solver": "implicit_midpoint",
+      "integration_seconds": 0.0,
+      "energy_drift": 8.567518460956575e-16,
+      "geometry_source": {
+        "geometry": {
+          "genus": 1,
+          "radius": 0.32,
+          "spacing": 1.1,
+          "thickness": 0.55,
+          "stretch": 1.0,
+          "area": 16.0
+        },
+        "generator": "implicit_double_v1",
+        "grid": 14,
+        "phase": 0.0,
+        "level": 0,
+        "scale": 1.5087932329807794,
+        "projection_residual": 1.865174681370263e-14,
+        "geometry_error": 0.06752538425632526,
+        "quality": {
+          "betti": [
+            1,
+            2,
+            1
+          ],
+          "euler": 0,
+          "area": 15.784292247539149,
+          "edge_min": 0.02377527125215094,
+          "edge_median": 0.27269799439224374,
+          "edge_max": 0.4656439082213681,
+          "area_min": 0.0007392610613138513,
+          "area_max": 0.057170917666081435,
+          "shape_quality_min": 0.08374886265854971,
+          "shape_quality_median": 0.8468521744289284
+        },
+        "transfer": "projected refinement; no FE commuting map claimed"
+      },
+      "coefficient": 1.0
+    }
+  ],
+  "complete": true,
+  "fingerprint": "frozen-legacy-reference"
+}

@@ -1,0 +1,46 @@
+{
+  "revision": "21b97a7224676b50c0b7f2b1ad6abf2c3feb0043",
+  "planar_config": {
+    "config_id": "baseline",
+    "geometry": "unit_square",
+    "h_coarse": 0.4,
+    "T": 0.1,
+    "n_snapshots": 3,
+    "seed": 1,
+    "ic": {
+      "type": "gaussian",
+      "x0": [
+        0.5,
+        0.5
+      ],
+      "width": 0.15
+    }
+  },
+  "surface_settings": {
+    "grids": [
+      12,
+      14
+    ],
+    "modes": 8,
+    "dt": 0.01,
+    "times": [
+      0.0,
+      0.037,
+      0.1,
+      0.163,
+      0.2
+    ],
+    "noise_seed": 31,
+    "noise": [
+      0.0,
+      0.03
+    ]
+  },
+  "sha256": {
+    "expected.json": "dd5d799d3ea47df74bb745188aae86c5651799c0d1a885c5733e8a3ae614fa1a",
+    "planar/baseline/baseline-coarse.h5": "53f27657361baea902e41ec28b2c229c2c2cf635c22208a6dfa9ca42f80a9b76",
+    "surface/baseline-12/medium.h5": "00fce83f570131246122e87bcade46b0785de4d403cc98ea59491f7ad866cc84",
+    "surface/baseline-14/medium.h5": "e3e1428be3dcc4f22be9899daa0f4fb8952831a973592f116237cfae976acbe2",
+    "surface/index.json": "651b62db26df6acf0a24ddaeac9dfb898bb069eb9d5538f5000935b6a390354e"
+  }
+}
