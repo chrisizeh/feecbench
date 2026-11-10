@@ -45,7 +45,7 @@ class FEECDataset(Dataset):
         self._all_entries = []
         for original in self.index_metadata["samples"]:
             entry = dict(original)
-            if "resolution_level" not in entry:
+            if "resolution_level" not in entry or "sample_id" not in entry:
                 sample = load_sample(self.root / entry["path"])
                 entry.update(sample_id=sample.ids.sample_id, resolution_level=sample.ids.resolution_level,
                              refinement=sample.ids.refinement)

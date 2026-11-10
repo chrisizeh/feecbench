@@ -75,10 +75,13 @@ def compute_stats(samples, *, policy=None) -> dict:
             if fld.data.ndim == 2:
                 a["series"] = True
                 _accumulate(a["dz"], np.diff(z, axis=0), star, ones, vol)
-    return {
+    result = {
         name: {"form_degree": a["degree"], **_moments(a["z"]), **({"delta": _moments(a["dz"])} if a["series"] else {})}
         for name, a in acc.items()
     }
+    if policy is not None:
+        return {"version": 1, "policy": policy, "provenance": {"split": "train"}, "fields": result}
+    return result
 
 
 def _zero() -> dict:

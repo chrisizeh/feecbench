@@ -11,7 +11,7 @@ import numpy as np
 
 from ..evaluator import register_energy
 from ..schema import FEECSample, Field, IdBlock, MeshBlock, SolverMeta, TopologyBlock
-from .data import SurfaceSample, digest
+from .data import SurfaceSample
 from .geometry import validate_mesh
 from .operators import SurfaceOperators
 
@@ -39,7 +39,7 @@ def to_feec(surface: SurfaceSample) -> FEECSample:
     if not np.all(op.edges[:, 0] < op.edges[:, 1]):
         raise ValueError("conversion requires canonical low-to-high edge orientation")
     label = meta["resolution"]
-    sid = f"{meta['config_id']}-{label}-{digest(meta)[:12]}"
+    sid = meta.get('sample_id', f"{meta['config_id']}-{label}")
     dt = meta["dt"]
     return FEECSample(
         mesh=MeshBlock(

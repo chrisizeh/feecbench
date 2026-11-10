@@ -39,7 +39,7 @@ class Field:
 
 @dataclass
 class MeshBlock:
-    points: np.ndarray  # (n0, 2) float64
+    points: np.ndarray  # (n0, 2) planar or (n0, 3) embedded surface
     edges: np.ndarray  # (n1, 2) int64, sorted pairs i < j, lexicographic
     tris: np.ndarray  # (n2, 3) int64, counter-clockwise
     boundary_vertices: np.ndarray  # (n0,) bool

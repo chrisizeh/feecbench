@@ -108,12 +108,16 @@ def evaluate_profile(
     include_hodge: bool = True,
     harmonic: np.ndarray | None = None,
     *,
-    profile: str = "planar",
+    profile: str | None = None,
     selected: np.ndarray | None = None,
+    thresholds: tuple[float, float] = (10.0, 30.0),
+    floor: float = 1e-8,
 ) -> dict:
     """Metric profile of ``pred`` (keyed like the sample's target fields) against ``target``
     (default: the sample's role == "target" fields). ``include_hodge=False`` skips the
     harmonic-basis solve; ``harmonic`` supplies a precomputed basis."""
+    if profile is None:
+        profile = "surface_acoustic" if sample.params.get("pde") == "surface_acoustic" else "planar"
     if profile == "surface_acoustic":
         from .surface.compat import from_feec
         from .surface.metrics import score
@@ -124,7 +128,7 @@ def evaluate_profile(
             sample = replace(sample, fields={**sample.fields, **{
                 n: replace(sample.fields[n], data=v) for n, v in target.items()
             }})
-        return score(from_feec(sample), pred["p"], pred["u"], selected=selected)
+        return score(from_feec(sample), pred["p"], pred["u"], selected=selected, thresholds=thresholds, floor=floor)
     if profile != "planar":
         raise ValueError(f"unknown evaluation profile {profile!r}")
     if sample.params.get("pde") == "surface_acoustic":

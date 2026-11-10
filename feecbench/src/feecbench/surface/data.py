@@ -79,7 +79,12 @@ def save(path, sample):
 
 def load(path):
     with h5py.File(path, "r") as f:
-        if f.attrs["version"] != VERSION:
+        if "schema_version" in f.attrs:
+            from ..io import load_sample
+            from .compat import from_feec
+
+            return from_feec(load_sample(path))
+        if f.attrs.get("version") != VERSION:
             raise ValueError("incompatible surface schema")
         arrays = {name: f[name][()] for name in ("points", "tris", "edges")}
         for name in ("d0", "d1", "m0", "m1", "m2"):

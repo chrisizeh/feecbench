@@ -127,3 +127,27 @@ See `DECISIONS.md` for the design choices and conventions.
 See [SURFACE_BENCHMARK.md](SURFACE_BENCHMARK.md) for standalone data generation,
 raw-unit prediction scoring and numerical validation. Models remain on the
 `experiment/acoustic-baseline` branch.
+
+
+## Shared planar and surface workflow
+
+Use `load_sample(path)`, `FEECDataset(root, split="train")`,
+`collate_feec(items)`, and `evaluate_profile(predictions, sample)` for either family.
+Surface predictions use `p` and `u`. The evaluator selects the surface acoustic
+profile from the sample PDE; `profile="planar"` explicitly selects original metrics,
+and `profile="surface_acoustic"` retains the complete surface score structure.
+Surface geometry, full consistent mass solves and midpoint dynamics stay in `surface/`.
+
+Shared writes use schema 0.2.0 and atomic replacement; readers retain planar 0.1.0
+and surface-0.2.0 compatibility. Legacy corpora and indexes are adapted in memory.
+Legacy sample identities use `<config_id>-<resolution>` unless a sample ID is stored.
+Remeshed surfaces are medium resolution, with refinement tracked independently.
+Fingerprint indexes cannot be replaced by directory scans, and incomplete indexes fail.
+New surface generation uses generator contract 3 and rejects older resume settings.
+
+`compute_stats(samples, policy="surface_energy")` fits training-medium regular-query
+energy per area with equal configuration weights and no centering. Use RMS mode.
+The original `compute_stats(samples)` and field-keyed statistics remain supported;
+`policy="star_weighted"` explicitly filters training data. `load_full()` stays raw.
+Batch compatible field schemas and query shapes together; query coordinates, operator
+types and auxiliary spectral arrays remain available per sample.
