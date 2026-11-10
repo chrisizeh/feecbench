@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import platform
 import shutil
@@ -12,7 +11,6 @@ from collections import Counter, defaultdict
 from functools import partial
 from pathlib import Path
 
-import h5py
 import numpy as np
 import torch
 
@@ -66,13 +64,13 @@ def _corpus_snapshot(root):
         if path in seen_paths:
             raise ValueError("duplicate source sample path")
         seen_paths.add(path)
-        with h5py.File(path, "r") as stream:
-            metadata = json.loads(stream["metadata"][()].decode())
-            if int(stream.attrs["genus"]) != config["geometry"]["genus"]:
-                raise ValueError("sample genus differs from manifest")
-            if config["split"] in ("train", "validation"):
-                if np.count_nonzero((stream["times"][()] > 0) & ~stream["offgrid"][()]) < 3:
-                    raise ValueError("three positive regular queries per train/validation case required")
+        sample = load(path)
+        metadata = sample.metadata
+        if sample.ops.genus != config["geometry"]["genus"]:
+            raise ValueError("sample genus differs from manifest")
+        if config["split"] in ("train", "validation"):
+            if np.count_nonzero((sample.times > 0) & ~sample.offgrid) < 3:
+                raise ValueError("three positive regular queries per train/validation case required")
         for key in ("config_id", "geometry_id", "split", "family"):
             if entry[key] != config[key] or metadata[key] != config[key]:
                 raise ValueError(f"sample/index {key} differs from manifest")
