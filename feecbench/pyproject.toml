@@ -19,6 +19,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+surface = [
+    "numpy>=1.26,<2; python_version < '3.13'",
+    "numpy>=2.0,<2.3; python_version >= '3.13'",
+    "pydec @ git+https://github.com/hirani/pydec.git@c181202c70e79794dcc8fa4577537a4eb4987b2a",
+    "scikit-image>=0.25",
+]
 dev = [
     "pytest>=7",
     "ruff>=0.4",
@@ -33,6 +39,10 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # Upstream PyDEC's pinned 1x1 scalar assignment is verified with NumPy <2.3.
+    "ignore:Conversion of an array with ndim > 0 to a scalar is deprecated.*:DeprecationWarning:pydec.fem.innerproduct",
+]
 
 [tool.ruff]
 line-length = 120

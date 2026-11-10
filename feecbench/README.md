@@ -121,3 +121,9 @@ family/level including gmsh meshing; sizes from the built corpus) and extrapolat
 1 000 and 10 000 configurations.
 
 See `DECISIONS.md` for the design choices and conventions.
+
+## Closed-surface benchmark
+
+See [SURFACE_BENCHMARK.md](SURFACE_BENCHMARK.md) for standalone data generation,
+raw-unit prediction scoring and numerical validation. Models remain on the
+`experiment/acoustic-baseline` branch.

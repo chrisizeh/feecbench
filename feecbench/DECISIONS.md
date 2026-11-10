@@ -91,3 +91,26 @@ Design and implementation choices behind feecbench, with the reasoning for each.
 
 17. **Mesh quality is checked from gmsh stats** — min angle > 20° on every level, with
     quality statistics stored per sample.
+
+18. **Closed surfaces are an additive, separately versioned experiment.** The
+    `surface/` package and `surface-0.2.0` HDF5 format preserve planar 0.1.0 APIs.
+    Surface triangles have consistent manifold orientation, not global planar CCW;
+    edges retain low-to-high orientation. Whitney FEEC assembly comes from pinned
+    hirani/PyDEC, with consistent M0/M1 and inverse-area mass for top-form integrals.
+    All surface codifferential applications solve the full M0 system. The auxiliary
+    lumped metric in harmonic nullspace extraction does not enter dynamics.
+
+19. **Surface dynamics and query sampling.** Implicit midpoint uses a reduced
+    pressure factorization and conserves physical discrete energy for c=1. Query
+    remainder steps do not alter the regular reference trajectory. Surface
+    normalization uses training-medium mass energy per physical area, without
+    centering pressure or edge forms. Random orientation flips transform cochains,
+    incidence and M1 consistently; model outputs map back to requested signs.
+
+20. **Scientific readiness requires measured reference uncertainty.** MFEM operator
+    and trajectory agreement, temporal convergence, sphere continuum verification,
+    and multi-torus geometric/spectral self-convergence are distinct checks. A
+    hashed protocol binds reviewed evidence, development identities, physical band
+    thresholds and numerical settings. Unresolved bands cannot enter the spectral
+    objective. See `SURFACE_BENCHMARK.md` for the standalone interface; numerical
+    validation remains required before scientific comparisons.
