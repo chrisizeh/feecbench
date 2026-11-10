@@ -7,16 +7,21 @@ import pytest
 
 from feecbench import FEECDataset, assert_samples_equal, collate_feec, evaluate_profile, load_sample, save_sample
 from feecbench.normalization import Normalizer, compute_stats
+from feecbench.schema import first_difference
 from feecbench.surface.compat import from_feec
 from feecbench.surface.data import load
 
-REFERENCE = Path('/private/tmp/feecbench-unification-reference')
+REFERENCE = Path(__file__).parent / "fixtures" / "unification"
 
 
 @pytest.fixture
 def reference():
-    if not (REFERENCE / 'expected.json').exists():
-        pytest.skip('run the documented baseline capture before numerical parity checks')
+    import hashlib
+
+    capture = json.loads((REFERENCE / 'capture.json').read_text())
+    assert capture['revision'].startswith('21b97a7')
+    for relative, checksum in capture['sha256'].items():
+        assert hashlib.sha256((REFERENCE / relative).read_bytes()).hexdigest() == checksum, relative
     return json.loads((REFERENCE / 'expected.json').read_text())
 
 
@@ -27,8 +32,12 @@ def test_surface_reference_parity(reference, tmp_path):
         source = load(path)
         assert sample.solver_meta.cfl is None
         assert sample.topology.betti2 == 1
-        assert_samples_equal(sample, load_sample(save_sample(sample, tmp_path)))
-        np.testing.assert_array_equal(from_feec(sample).pressure, source.pressure)
+        restored = load_sample(save_sample(sample, tmp_path))
+        assert_samples_equal(sample, restored)
+        for name, operator in sample.operators.items():
+            for part in ("data", "indices", "indptr"):
+                assert getattr(operator, part).dtype == getattr(restored.operators[name], part).dtype
+        assert first_difference(from_feec(sample), source) is None
         rng = np.random.default_rng(31)
         actual = []
         for noise in (0, .03):
@@ -37,7 +46,7 @@ def test_surface_reference_parity(reference, tmp_path):
                     pred = dict(p=source.pressure + noise*rng.normal(size=source.pressure.shape),
                                 u=source.velocity + noise*rng.normal(size=source.velocity.shape))
                     actual.append(evaluate_profile(pred, sample, profile='surface_acoustic', selected=selected))
-        assert actual == expected
+        assert_metrics_close(actual, expected)
 
 
 def test_surface_dataset_and_scales(reference):
@@ -46,7 +55,7 @@ def test_surface_dataset_and_scales(reference):
     assert len(batch.auxiliary) == 2
     stats = compute_stats((ds.load_full(i) for i in range(len(ds))), policy='surface_energy')
     for name, long in [('p', 'pressure'), ('u', 'velocity')]:
-        assert stats['fields'][name]['rms'] == reference['surface_scales'][long]
+        assert stats['fields'][name]['rms'] == pytest.approx(reference['surface_scales'][long], rel=1e-12)
     normalizer = Normalizer(stats, 'rms')
     x = ds.load_full(0).fields['p'].data
     np.testing.assert_allclose(normalizer.denormalize('p', normalizer.normalize('p', x)), x, atol=1e-14)
@@ -88,10 +97,11 @@ def test_query_rejection(square_samples, tmp_path):
         collate_feec([a, b])
 
 
-def test_planar_reference(reference):
+def test_planar_reference(reference, tmp_path):
     path = next((REFERENCE / 'planar').glob('*/*.h5'))
     sample = load_sample(path)
-    assert compute_stats([sample]) == reference['planar_stats']
+    assert_samples_equal(sample, load_sample(save_sample(sample, tmp_path)))
+    assert_metrics_close(compute_stats([sample]), reference['planar_stats'])
     rng = np.random.default_rng(31)
     for noise, expected in zip((0, .03), reference['planar_scores'], strict=True):
         pred = {n: f.data + noise*rng.normal(size=f.data.shape)
@@ -99,15 +109,19 @@ def test_planar_reference(reference):
         assert_metrics_close(evaluate_profile(pred, sample), expected)
 
 
-def test_fresh_process(reference):
+@pytest.mark.parametrize("profile", ["planar", "surface_acoustic"])
+def test_fresh_process(reference, tmp_path, profile):
     import subprocess
     import sys
 
-    path = next((REFERENCE / 'surface').glob('*/*.h5'))
+    source = next((REFERENCE / 'surface').glob('*/*.h5'))
+    path = save_sample(load_sample(source), tmp_path)
     subprocess.run([sys.executable, '-c',
                     'from feecbench import load_sample,evaluate_profile; import sys; '
                     's=load_sample(sys.argv[1]); '
-                    'r=evaluate_profile({n:f.data for n,f in s.fields.items() if f.role=="target"},s); '
+                    'assert "feecbench.surface.compat" not in sys.modules; '
+                    'pred={n:f.data for n,f in s.fields.items() if f.role=="target"}; '
+                    f'r=evaluate_profile(pred,s,profile={profile!r}); '
                     'assert "energy" in r', str(path)], check=True)
 
 
@@ -126,7 +140,11 @@ def assert_metrics_close(actual, expected):
         assert set(actual) == set(expected)
         for key in expected:
             assert_metrics_close(actual[key], expected[key])
-    elif isinstance(expected, (float, int, list, tuple)):
+    elif isinstance(expected, (list, tuple)):
+        assert len(actual) == len(expected)
+        for a, b in zip(actual, expected, strict=True):
+            assert_metrics_close(a, b)
+    elif isinstance(expected, (float, int)):
         np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-12, equal_nan=True)
     else:
         assert actual == expected

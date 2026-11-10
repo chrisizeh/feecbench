@@ -24,7 +24,7 @@ from torch.utils.data import Dataset
 
 from .io import load_sample
 from .normalization import Normalizer, load_stats
-from .schema import LEVELS, FEECSample
+from .schema import LEVELS, FEECSample, surface_identity
 
 
 class FEECDataset(Dataset):
@@ -45,10 +45,10 @@ class FEECDataset(Dataset):
         self._all_entries = []
         for original in self.index_metadata["samples"]:
             entry = dict(original)
-            if "resolution_level" not in entry or "sample_id" not in entry:
-                sample = load_sample(self.root / entry["path"])
-                entry.update(sample_id=sample.ids.sample_id, resolution_level=sample.ids.resolution_level,
-                             refinement=sample.ids.refinement)
+            if "resolution" in entry:
+                identity = surface_identity(entry)
+                for key, value in identity.items():
+                    entry.setdefault(key, value)
             self._all_entries.append(entry)
         wanted = {**(filters or {}), **({"split": split} if split is not None else {})}
         self.entries = [e for e in self._all_entries if all(e.get(k) == v for k, v in wanted.items())]
@@ -91,7 +91,22 @@ class FEECDataset(Dataset):
     def get_config(self, config_id: str, refinement: str = "nested") -> dict[str, FEECSample]:
         """All discretizations of one configuration from the full index: ``{level: sample}`` in
         coarse -> fine order for ``"nested"``, ``{sample_id: sample}`` for ``"remeshed"``."""
-        entries = [e for e in self._all_entries if e["config_id"] == config_id and e["refinement"] == refinement]
+        candidates = [e for e in self._all_entries if e["config_id"] == config_id]
+        for entry in candidates:
+            if any(key not in entry for key in ("sample_id", "resolution_level", "refinement")):
+                # Nonstandard indexes need inspection only when this configuration is requested.
+                import h5py
+
+                with h5py.File(self.root / entry["path"], "r") as stream:
+                    if "ids" in stream:
+                        identity = dict(stream["ids"].attrs)
+                    elif "metadata" in stream:
+                        identity = surface_identity(json.loads(stream["metadata"][()].decode()))
+                    else:
+                        raise ValueError(f"missing identity metadata in {entry['path']}")
+                for key in ("sample_id", "resolution_level", "refinement"):
+                    entry.setdefault(key, identity[key])
+        entries = [e for e in candidates if e["refinement"] == refinement]
         if not entries:
             raise KeyError(f"{config_id} ({refinement})")
         if refinement == "nested":

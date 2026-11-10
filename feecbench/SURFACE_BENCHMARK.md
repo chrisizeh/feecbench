@@ -81,3 +81,39 @@ The original `compute_stats(samples)` and field-keyed statistics remain supporte
 `policy="star_weighted"` explicitly filters training data. `load_full()` stays raw.
 Batch compatible field schemas and query shapes together; query coordinates, operator
 types and auxiliary spectral arrays remain available per sample.
+
+### Portable migration regressions
+
+`tests/fixtures/unification/` contains compact, frozen planar 0.1.0 and
+surface-0.2.0 samples captured from revision `21b97a7`. `capture.json` records
+settings, the full source revision, and SHA-256 checksums. Normal tests read these
+files and generate round-trip working files only under pytest temporary directories.
+Missing or changed references fail tests. Numerical metrics use `rtol=1e-10` and
+`atol=1e-12` to allow floating-point solver variation; stored arrays and CSR
+representations are checked exactly. These tolerances are substantially below the
+perturbation magnitude (0.03) and the harmonic solver tolerance (1e-7).
+
+To reproduce the capture in a **new** directory using the supported surface/dev
+environment (substitute absolute paths for the variables):
+
+```sh
+git worktree add --detach /tmp/feecbench-legacy 21b97a7
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+PYTHONPATH=/tmp/feecbench-legacy/feecbench/src python "$FIX_WORKTREE/feecbench/scripts/capture_unification_baseline.py" "$NEW_BASELINE"
+cd "$FIX_WORKTREE/feecbench"
+PYTHONPATH=src python -m pytest tests/test_unified_api.py tests/test_unified_review.py -q
+```
+
+Capture verifies the imported checkout's revision and tracked source contents,
+and refuses any existing destination. Do not replace committed references during
+normal testing. The capture script lives in the fix/current checkout but must
+import the pinned legacy checkout through `PYTHONPATH`.
+
+For `profile="planar"` on surfaces, shared final-time Hodge metrics use an explicit
+`harmonic` basis first, otherwise `auxiliary["harmonic_basis"]`. A missing,
+nonfinite, or incorrectly shaped surface basis raises a specific error; callers
+may supply a valid basis or disable Hodge metrics with `include_hodge=False`.
+This does not change the default surface acoustic metric definitions.
+Legacy index normalization uses index metadata only; excluded unavailable files
+are never opened during dataset construction. Split labels and fingerprints are
+preserved, and `get_config` still resolves against the full index.

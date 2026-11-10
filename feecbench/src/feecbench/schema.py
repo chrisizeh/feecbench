@@ -162,3 +162,19 @@ def assert_samples_equal(a: FEECSample, b: FEECSample) -> None:
     """Bit-exact equality of two samples (used by the IO round-trip test)."""
     diff = first_difference(a, b)
     assert diff is None, f"samples differ at {diff}"
+
+
+def surface_identity(metadata: dict) -> dict:
+    """Canonical identity from legacy surface metadata, without reading sample arrays.
+
+    Remeshed generation uses the medium grid plus one; refinement is independent
+    of resolution. Missing legacy IDs are `<config_id>-<resolution>`.
+    """
+    label = metadata.get("resolution", metadata.get("resolution_level"))
+    if label not in (*LEVELS, "remeshed"):
+        raise ValueError(f"unsupported surface resolution {label!r}")
+    return {
+        "sample_id": metadata.get("sample_id", f"{metadata['config_id']}-{label}"),
+        "resolution_level": "medium" if label == "remeshed" else label,
+        "refinement": metadata.get("refinement", "remeshed" if label == "remeshed" else "nested"),
+    }

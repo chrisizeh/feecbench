@@ -43,6 +43,12 @@ def register_energy(pde_name: str):
 
 def harmonic_basis(sample: FEECSample) -> np.ndarray:
     """star1-orthonormal harmonic 1-form basis (n1, beta1), cached per sample_id."""
+    if sample.params.get("pde") == "surface_acoustic":
+        basis = sample.auxiliary.get("harmonic_basis")
+        if basis is None:
+            raise ValueError("surface shared-profile evaluation requires auxiliary harmonic_basis; "
+                             "supply harmonic explicitly or set include_hodge=False")
+        return _validate_surface_basis(sample, basis)
     key = sample.ids.sample_id
     if key not in _HARMONIC_CACHE:
         ops = sample.operators
@@ -50,6 +56,14 @@ def harmonic_basis(sample: FEECSample) -> np.ndarray:
             ops["d0"], ops["d1"], ops["star0"], ops["star1"], ops["star2"], sample.topology.betti1
         )
     return _HARMONIC_CACHE[key]
+
+
+def _validate_surface_basis(sample: FEECSample, basis: np.ndarray) -> np.ndarray:
+    basis = np.asarray(basis)
+    expected = (sample.mesh.n_cells[1], sample.topology.betti1)
+    if basis.shape != expected or not np.isfinite(basis).all():
+        raise ValueError(f"surface harmonic_basis must be finite with shape {expected}; got {basis.shape}")
+    return basis
 
 
 def _d1_norm(sample: FEECSample) -> float:
@@ -144,6 +158,8 @@ def evaluate_profile(
             basis = None
             if degree == 1 and include_hodge:
                 basis = harmonic if harmonic is not None else harmonic_basis(sample)
+                if sample.params.get("pde") == "surface_acoustic":
+                    basis = _validate_surface_basis(sample, basis)
             profile["fields"][name] = _field_profile(np.asarray(pred[name]), np.asarray(tgt), sample, degree, basis)
     energy = ENERGY_REGISTRY.get(sample.params.get("pde"))
     if energy is not None and all(n in pred for n in target):

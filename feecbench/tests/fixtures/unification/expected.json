@@ -1,0 +1,1113 @@
+{
+  "planar_stats": {
+    "p": {
+      "form_degree": 0,
+      "mean": 0.040109506109100405,
+      "std": 0.05745940677748985,
+      "rms": 0.07007393172597788,
+      "delta": {
+        "mean": 2.710505431213761e-19,
+        "std": 0.007181042770788437,
+        "rms": 0.007181042770788437
+      }
+    },
+    "u": {
+      "form_degree": 1,
+      "mean": 0.0008935759816914079,
+      "std": 0.004904630927465486,
+      "rms": 0.004985366844045352,
+      "delta": {
+        "mean": 0.0008529900929950849,
+        "std": 0.0037266272866885433,
+        "rms": 0.003823001835291134
+      }
+    },
+    "p0": {
+      "form_degree": 0,
+      "mean": 0.0401095061091004,
+      "std": 0.06231885651620423,
+      "rms": 0.07411081134222734
+    },
+    "u0": {
+      "form_degree": 1,
+      "mean": 0.0,
+      "std": 0.0,
+      "rms": 0.0
+    },
+    "c2": {
+      "form_degree": 2,
+      "mean": 1.0,
+      "std": 0.0,
+      "rms": 1.0
+    }
+  },
+  "planar_scores": [
+    {
+      "fields": {
+        "p": {
+          "form_degree": 0,
+          "rel_l2_star": 0.0,
+          "mse": 0.0,
+          "mae": 0.0,
+          "max": 0.0,
+          "p99": 0.0,
+          "rollout_rel_l2": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "boundary": 0.0,
+          "interior": 0.0
+        },
+        "u": {
+          "form_degree": 1,
+          "rel_l2_star": 0.0,
+          "mse": 0.0,
+          "mae": 0.0,
+          "max": 0.0,
+          "p99": 0.0,
+          "rollout_rel_l2": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "boundary": 0.0,
+          "interior": 0.0,
+          "closedness": {
+            "pred": {
+              "abs": 1.1606068342072591e-18,
+              "rel_opnorm": 3.707230395889717e-17
+            },
+            "target": {
+              "abs": 1.1606068342072591e-18,
+              "rel_opnorm": 3.707230395889717e-17
+            }
+          },
+          "hodge_error": {
+            "exact": 0.0,
+            "harmonic": 0.0,
+            "coexact": 0.0
+          }
+        }
+      },
+      "energy": {
+        "target_drift_rel": 0.006891670145797298,
+        "pred_vs_target_rel": 0.0,
+        "curve_pred": [
+          0.002746206178901607,
+          0.0027408089320035255,
+          0.0027272802317642665
+        ],
+        "curve_target": [
+          0.002746206178901607,
+          0.0027408089320035255,
+          0.0027272802317642665
+        ]
+      }
+    },
+    {
+      "fields": {
+        "p": {
+          "form_degree": 0,
+          "rel_l2_star": 0.3684610756186705,
+          "mse": 0.0006607081857159683,
+          "mae": 0.020246658973656063,
+          "max": 0.05943871767176143,
+          "p99": 0.057945702947091865,
+          "rollout_rel_l2": [
+            0.40312527615461846,
+            0.36384313581954436,
+            0.32306298573705966
+          ],
+          "boundary": 7.936083500550966,
+          "interior": 0.2900519698238656
+        },
+        "u": {
+          "form_degree": 1,
+          "rel_l2_star": 5.805220629348891,
+          "mse": 0.0009077917404315137,
+          "mae": 0.023453725429877084,
+          "max": 0.1062911311456268,
+          "p99": 0.08351736843647822,
+          "rollout_rel_l2": [
+            1.2844399603882847e+29,
+            6.769610985324315,
+            4.225341692916726
+          ],
+          "boundary": 236.2513126397314,
+          "interior": 5.601666139609763,
+          "closedness": {
+            "pred": {
+              "abs": 0.04542357201997104,
+              "rel_opnorm": 0.3466537609423901
+            },
+            "target": {
+              "abs": 1.1606068342072591e-18,
+              "rel_opnorm": 3.707230395889717e-17
+            }
+          },
+          "hodge_error": {
+            "exact": 3.5460465511734216,
+            "harmonic": 0.0,
+            "coexact": 2.297621874637223
+          }
+        }
+      },
+      "energy": {
+        "target_drift_rel": 0.006891670145797298,
+        "pred_vs_target_rel": 4.001906892301701,
+        "curve_pred": [
+          0.011304018614300752,
+          0.01254138169597146,
+          0.013717341666792124
+        ],
+        "curve_target": [
+          0.002746206178901607,
+          0.0027408089320035255,
+          0.0027272802317642665
+        ]
+      }
+    }
+  ],
+  "surface_scores": {
+    "surface/baseline-12/medium.h5": [
+      {
+        "times": [
+          0.037,
+          0.1,
+          0.163,
+          0.2
+        ],
+        "pressure": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "velocity": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "pressure_constant_error": 0.0,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 1.0221746432294698
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "harmonic": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "coexact": {
+            "mass_rmse": 0.0
+          }
+        },
+        "energy": {
+          "predicted": [
+            1.822270335174771,
+            1.8222703351747698,
+            1.8222703351747704,
+            1.822270335174769
+          ],
+          "reference": [
+            1.822270335174771,
+            1.8222703351747698,
+            1.8222703351747704,
+            1.822270335174769
+          ],
+          "relative_error_max": 0.0,
+          "drift_max": 1.0966547639780464e-15,
+          "reference_drift_max": 1.0966547639780464e-15
+        },
+        "mean_pressure_error": 0.0,
+        "closedness_error": 0.0,
+        "harmonic_drift": 6.526880334495322e-16
+      },
+      {
+        "times": [
+          0.1,
+          0.2
+        ],
+        "pressure": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "velocity": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "pressure_constant_error": 0.0,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 1.028396027041818
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "harmonic": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "coexact": {
+            "mass_rmse": 0.0
+          }
+        },
+        "energy": {
+          "predicted": [
+            1.8222703351747698,
+            1.822270335174769
+          ],
+          "reference": [
+            1.8222703351747698,
+            1.822270335174769
+          ],
+          "relative_error_max": 0.0,
+          "drift_max": 3.655515879926821e-16,
+          "reference_drift_max": 3.655515879926821e-16
+        },
+        "mean_pressure_error": 0.0,
+        "closedness_error": 0.0,
+        "harmonic_drift": 7.207818685942235e-16
+      },
+      {
+        "times": [
+          0.037,
+          0.163
+        ],
+        "pressure": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "velocity": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "pressure_constant_error": 0.0,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 1.0159532594171221
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "harmonic": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "coexact": {
+            "mass_rmse": 0.0
+          }
+        },
+        "energy": {
+          "predicted": [
+            1.822270335174771,
+            1.8222703351747704
+          ],
+          "reference": [
+            1.822270335174771,
+            1.8222703351747704
+          ],
+          "relative_error_max": 0.0,
+          "drift_max": 1.0966547639780464e-15,
+          "reference_drift_max": 1.0966547639780464e-15
+        },
+        "mean_pressure_error": 0.0,
+        "closedness_error": 0.0,
+        "harmonic_drift": 5.766080435809534e-16
+      },
+      {
+        "times": [
+          0.037,
+          0.1,
+          0.163,
+          0.2
+        ],
+        "pressure": {
+          "mass_rmse": 0.02201221889681418,
+          "normalized_rmse": 0.080239313687047,
+          "final_normalized_rmse": 0.0793175791131665,
+          "curve": [
+            0.0732727062533364,
+            0.08126047813015663,
+            0.0865445359330703,
+            0.0793175791131665
+          ],
+          "mse_cochain": 0.0009358915955001075,
+          "max_cochain": 0.10041382272934585
+        },
+        "velocity": {
+          "mass_rmse": 0.17748810406556698,
+          "normalized_rmse": 0.44734419661622155,
+          "final_normalized_rmse": 0.4583534000317404,
+          "curve": [
+            0.4511920624203286,
+            0.44943703463840584,
+            0.4298971462670118,
+            0.4583534000317404
+          ],
+          "mse_cochain": 0.0008816172506145152,
+          "max_cochain": 0.12508469152153529
+        },
+        "pressure_constant_error": 0.002088340519635511,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.0007273272420426358,
+            "target_energy": 1.0221746432294698
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.12796257312382947,
+            "normalized_rmse": 0.4183129138861869
+          },
+          "harmonic": {
+            "mass_rmse": 0.006560428086409729,
+            "normalized_rmse": 0.025964354303993673
+          },
+          "coexact": {
+            "mass_rmse": 0.1228192482782775
+          }
+        },
+        "energy": {
+          "predicted": [
+            2.0668761753355174,
+            2.07202763178044,
+            2.0177825362819872,
+            2.059134154658169
+          ],
+          "reference": [
+            1.822270335174771,
+            1.8222703351747698,
+            1.8222703351747704,
+            1.822270335174769
+          ],
+          "relative_error_max": 0.13705831225185175,
+          "drift_max": 0.1370583122518521,
+          "reference_drift_max": 1.0966547639780464e-15
+        },
+        "mean_pressure_error": 0.002714123047328271,
+        "closedness_error": 2.0112009880179063,
+        "harmonic_drift": 0.006560428086410012
+      },
+      {
+        "times": [
+          0.1,
+          0.2
+        ],
+        "pressure": {
+          "mass_rmse": 0.02104652019531664,
+          "normalized_rmse": 0.07651748071995326,
+          "final_normalized_rmse": 0.07946026179793816,
+          "curve": [
+            0.07345690237452139,
+            0.07946026179793816
+          ],
+          "mse_cochain": 0.000929081860098907,
+          "max_cochain": 0.10170667065277367
+        },
+        "velocity": {
+          "mass_rmse": 0.18362756057046553,
+          "normalized_rmse": 0.4634031776279931,
+          "final_normalized_rmse": 0.4725494136918223,
+          "curve": [
+            0.4540727493375457,
+            0.4725494136918223
+          ],
+          "mse_cochain": 0.0009741226979576572,
+          "max_cochain": 0.11987572543744114
+        },
+        "pressure_constant_error": 0.0009556682351423711,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.0005524773614838243,
+            "target_energy": 1.028396027041818
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.13176968109313258,
+            "normalized_rmse": 0.4316755580220042
+          },
+          "harmonic": {
+            "mass_rmse": 0.007240926029856663,
+            "normalized_rmse": 0.028657576373357852
+          },
+          "coexact": {
+            "mass_rmse": 0.127684772529477
+          }
+        },
+        "energy": {
+          "predicted": [
+            2.085073031586588,
+            2.063913042769718
+          ],
+          "reference": [
+            1.8222703351747698,
+            1.822270335174769
+          ],
+          "relative_error_max": 0.14421718410216752,
+          "drift_max": 0.14421718410216788,
+          "reference_drift_max": 3.655515879926821e-16
+        },
+        "mean_pressure_error": 0.0013448129452103264,
+        "closedness_error": 2.2209169400044,
+        "harmonic_drift": 0.0072409260298566215
+      },
+      {
+        "times": [
+          0.037,
+          0.163
+        ],
+        "pressure": {
+          "mass_rmse": 0.0210487160984993,
+          "normalized_rmse": 0.07693041255946578,
+          "final_normalized_rmse": 0.07344817224696669,
+          "curve": [
+            0.0802617140778786,
+            0.07344817224696669
+          ],
+          "mse_cochain": 0.0009066503608320765,
+          "max_cochain": 0.11123419918173644
+        },
+        "velocity": {
+          "mass_rmse": 0.17177275468370912,
+          "normalized_rmse": 0.43239397596806095,
+          "final_normalized_rmse": 0.42911610604421974,
+          "curve": [
+            0.435647183441351,
+            0.42911610604421974
+          ],
+          "mse_cochain": 0.0008619880336431853,
+          "max_cochain": 0.11115674118257045
+        },
+        "pressure_constant_error": 0.0008931985355795014,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.00038306837938173726,
+            "target_energy": 1.0159532594171221
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.12116646358117733,
+            "normalized_rmse": 0.3952582975413938
+          },
+          "harmonic": {
+            "mass_rmse": 0.008982784269504156,
+            "normalized_rmse": 0.03555136804150014
+          },
+          "coexact": {
+            "mass_rmse": 0.1214243671658555
+          }
+        },
+        "energy": {
+          "predicted": [
+            2.1221348045747637,
+            2.113728146917106
+          ],
+          "reference": [
+            1.822270335174771,
+            1.8222703351747704
+          ],
+          "relative_error_max": 0.16455542496181466,
+          "drift_max": 0.16455542496181574,
+          "reference_drift_max": 1.0966547639780464e-15
+        },
+        "mean_pressure_error": 0.0009721098686812578,
+        "closedness_error": 2.055369852402246,
+        "harmonic_drift": 0.008982784269504092
+      }
+    ],
+    "surface/baseline-14/medium.h5": [
+      {
+        "times": [
+          0.037,
+          0.1,
+          0.163,
+          0.2
+        ],
+        "pressure": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "velocity": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "pressure_constant_error": 0.0,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 1.0214046039667628
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "harmonic": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "coexact": {
+            "mass_rmse": 0.0
+          }
+        },
+        "energy": {
+          "predicted": [
+            1.8141918707948463,
+            1.814191870794845,
+            1.8141918707948448,
+            1.8141918707948457
+          ],
+          "reference": [
+            1.8141918707948463,
+            1.814191870794845,
+            1.8141918707948448,
+            1.8141918707948457
+          ],
+          "relative_error_max": 0.0,
+          "drift_max": 7.343587252248494e-16,
+          "reference_drift_max": 7.343587252248494e-16
+        },
+        "mean_pressure_error": 0.0,
+        "closedness_error": 0.0,
+        "harmonic_drift": 3.328199443285784e-16
+      },
+      {
+        "times": [
+          0.1,
+          0.2
+        ],
+        "pressure": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "velocity": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "pressure_constant_error": 0.0,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 1.0274103232606935
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "harmonic": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "coexact": {
+            "mass_rmse": 0.0
+          }
+        },
+        "energy": {
+          "predicted": [
+            1.814191870794845,
+            1.8141918707948457
+          ],
+          "reference": [
+            1.814191870794845,
+            1.8141918707948457
+          ],
+          "relative_error_max": 0.0,
+          "drift_max": 6.119656043540411e-16,
+          "reference_drift_max": 6.119656043540411e-16
+        },
+        "mean_pressure_error": 0.0,
+        "closedness_error": 0.0,
+        "harmonic_drift": 3.738595869130237e-16
+      },
+      {
+        "times": [
+          0.037,
+          0.163
+        ],
+        "pressure": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "velocity": {
+          "mass_rmse": 0.0,
+          "normalized_rmse": 0.0,
+          "final_normalized_rmse": 0.0,
+          "curve": [
+            0.0,
+            0.0
+          ],
+          "mse_cochain": 0.0,
+          "max_cochain": 0.0
+        },
+        "pressure_constant_error": 0.0,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 1.0153988846728321
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "harmonic": {
+            "mass_rmse": 0.0,
+            "normalized_rmse": 0.0
+          },
+          "coexact": {
+            "mass_rmse": 0.0
+          }
+        },
+        "energy": {
+          "predicted": [
+            1.8141918707948463,
+            1.8141918707948448
+          ],
+          "reference": [
+            1.8141918707948463,
+            1.8141918707948448
+          ],
+          "relative_error_max": 0.0,
+          "drift_max": 7.343587252248494e-16,
+          "reference_drift_max": 7.343587252248494e-16
+        },
+        "mean_pressure_error": 0.0,
+        "closedness_error": 0.0,
+        "harmonic_drift": 2.8594971578754764e-16
+      },
+      {
+        "times": [
+          0.037,
+          0.1,
+          0.163,
+          0.2
+        ],
+        "pressure": {
+          "mass_rmse": 0.02140836130242448,
+          "normalized_rmse": 0.07832375410434575,
+          "final_normalized_rmse": 0.07719340037617005,
+          "curve": [
+            0.08116155688406464,
+            0.07910591852258941,
+            0.07572764426026048,
+            0.07719340037617005
+          ],
+          "mse_cochain": 0.0009319419005133046,
+          "max_cochain": 0.10495056364646815
+        },
+        "velocity": {
+          "mass_rmse": 0.20660567521612988,
+          "normalized_rmse": 0.524503431013796,
+          "final_normalized_rmse": 0.5085641084788783,
+          "curve": [
+            0.5371737355719485,
+            0.5352054255328653,
+            0.5165050575163058,
+            0.5085641084788783
+          ],
+          "mse_cochain": 0.000937419969812039,
+          "max_cochain": 0.11230476879284083
+        },
+        "pressure_constant_error": 0.0015880758771747462,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.00029658746177462,
+            "target_energy": 1.0214046039667628
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.14432897065762607,
+            "normalized_rmse": 0.4763338728277243
+          },
+          "harmonic": {
+            "mass_rmse": 0.005550243505144684,
+            "normalized_rmse": 0.022050812374296423
+          },
+          "coexact": {
+            "mass_rmse": 0.14773032206509487
+          }
+        },
+        "energy": {
+          "predicted": [
+            2.10093911551641,
+            2.1890813161620715,
+            2.1750784391612554,
+            2.1810381567417245
+          ],
+          "reference": [
+            1.8141918707948463,
+            1.814191870794845,
+            1.8141918707948448,
+            1.8141918707948457
+          ],
+          "relative_error_max": 0.20664266630352462,
+          "drift_max": 0.20664266630352401,
+          "reference_drift_max": 7.343587252248494e-16
+        },
+        "mean_pressure_error": 0.0028056952148770354,
+        "closedness_error": 2.8270330040884657,
+        "harmonic_drift": 0.005550243505144611
+      },
+      {
+        "times": [
+          0.1,
+          0.2
+        ],
+        "pressure": {
+          "mass_rmse": 0.021236037567141743,
+          "normalized_rmse": 0.07749621024675868,
+          "final_normalized_rmse": 0.07084492912691907,
+          "curve": [
+            0.08362010058724795,
+            0.07084492912691907
+          ],
+          "mse_cochain": 0.0009012056476257478,
+          "max_cochain": 0.1218473152588197
+        },
+        "velocity": {
+          "mass_rmse": 0.19564795526767162,
+          "normalized_rmse": 0.4972955095802061,
+          "final_normalized_rmse": 0.5088828553788308,
+          "curve": [
+            0.48543165038835445,
+            0.5088828553788308
+          ],
+          "mse_cochain": 0.0009356366696380433,
+          "max_cochain": 0.10108618460824662
+        },
+        "pressure_constant_error": 0.0005217010133784821,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.00024436156873442144,
+            "target_energy": 1.0274103232606935
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.12895027717287066,
+            "normalized_rmse": 0.426463664657432
+          },
+          "harmonic": {
+            "mass_rmse": 0.007074594356295177,
+            "normalized_rmse": 0.02810697451928368
+          },
+          "coexact": {
+            "mass_rmse": 0.14696903936596495
+          }
+        },
+        "energy": {
+          "predicted": [
+            2.0592396808671882,
+            2.140341984680124
+          ],
+          "reference": [
+            1.814191870794845,
+            1.8141918707948457
+          ],
+          "relative_error_max": 0.17977707823284597,
+          "drift_max": 0.17977707823284575,
+          "reference_drift_max": 6.119656043540411e-16
+        },
+        "mean_pressure_error": 0.0005689929424878515,
+        "closedness_error": 2.854268440373365,
+        "harmonic_drift": 0.007074594356295398
+      },
+      {
+        "times": [
+          0.037,
+          0.163
+        ],
+        "pressure": {
+          "mass_rmse": 0.02011633660264225,
+          "normalized_rmse": 0.07378493270883332,
+          "final_normalized_rmse": 0.07400892167741886,
+          "curve": [
+            0.07356026170317641,
+            0.07400892167741886
+          ],
+          "mse_cochain": 0.0008054279355786023,
+          "max_cochain": 0.08491674364878099
+        },
+        "velocity": {
+          "mass_rmse": 0.1975560138341585,
+          "normalized_rmse": 0.5009155447210693,
+          "final_normalized_rmse": 0.49958821642180323,
+          "curve": [
+            0.5022393651426504,
+            0.49958821642180323
+          ],
+          "mse_cochain": 0.0008711921501264205,
+          "max_cochain": 0.1038163164666512
+        },
+        "pressure_constant_error": 0.0018003504553041325,
+        "pressure_bands": {
+          "low": {
+            "lower": 1e-08,
+            "upper": 10.0,
+            "covered": false,
+            "error_energy": 0.00034046992740304947,
+            "target_energy": 1.0153988846728321
+          },
+          "middle": {
+            "lower": 10.0,
+            "upper": 30.0,
+            "covered": false,
+            "error_energy": 0.0,
+            "target_energy": 0.0
+          }
+        },
+        "velocity_components": {
+          "exact": {
+            "mass_rmse": 0.13642737284549944,
+            "normalized_rmse": 0.4493258396351831
+          },
+          "harmonic": {
+            "mass_rmse": 0.010872930829962867,
+            "normalized_rmse": 0.043197556551883974
+          },
+          "coexact": {
+            "mass_rmse": 0.14247010183081982
+          }
+        },
+        "energy": {
+          "predicted": [
+            2.1619345474684666,
+            2.075597384341462
+          ],
+          "reference": [
+            1.8141918707948463,
+            1.8141918707948448
+          ],
+          "relative_error_max": 0.19167910642288616,
+          "drift_max": 0.19167910642288627,
+          "reference_drift_max": 7.343587252248494e-16
+        },
+        "mean_pressure_error": 0.0022196238157615325,
+        "closedness_error": 2.8924687589574685,
+        "harmonic_drift": 0.010872930829962966
+      }
+    ]
+  },
+  "surface_scales": {
+    "pressure": 0.2734619017954377,
+    "velocity": 0.3955922932634366,
+    "floor": 1e-08,
+    "training_configurations": 2,
+    "centering": false
+  }
+}
